@@ -103,6 +103,8 @@ function initGameState() {
         pauseSelection: 0,  // 0 = resume, 1 = restart, 2 = main menu
         // Kicker position (for run-up animation)
         kickerY: KICKER_START_Y,
+        kickerX: CANVAS_WIDTH / 2,
+        kickerLeftFooted: Math.random() < 0.20,  // ~20% chance left-footed
     };
 }
 
@@ -126,7 +128,15 @@ function resetKickState() {
     state.keeperY = GOAL_Y + GOAL_HEIGHT - 30;
     state.keeperDiving = false;
     state.keeperDiveTarget = null;
-    state.kickerY = KICKER_START_Y;
+    // Randomize kicker starting distance (how far back they stand)
+    // Some players take a long run-up, others just a step or two
+    const distanceVariation = Math.random() * 180;  // 0-180px extra distance
+    state.kickerY = KICKER_BALL_Y + 30 + distanceVariation;  // minimum 30px back, max ~210px back
+    // Randomize footedness: ~20% left-footed
+    state.kickerLeftFooted = Math.random() < 0.20;
+    // Left-footed starts to the right of ball, right-footed starts to the left
+    const sideOffset = 75 + Math.random() * 45;  // 75-120px offset (3x wider)
+    state.kickerX = CANVAS_WIDTH / 2 + (state.kickerLeftFooted ? sideOffset : -sideOffset);
 }
 
 // --- INPUT HANDLER ---
@@ -448,8 +458,11 @@ function renderGameplay() {
 
     // Draw kicker
     const kickerTeam = state.playerIsKicker ? state.playerTeam : state.aiTeam;
-    const kickerPose = (state.kickState === 'flight' || state.kickState === 'outcome') ? 'kick' : 'stand';
-    drawPlayer(CANVAS_WIDTH / 2, state.kickerY, kickerTeam, kickerPose);
+    let kickerPose = 'stand';
+    if (state.kickState === 'flight' || state.kickState === 'outcome') {
+        kickerPose = state.kickerLeftFooted ? 'kickLeft' : 'kick';
+    }
+    drawPlayer(state.kickerX, state.kickerY, kickerTeam, kickerPose);
 
     // Draw ball AFTER kicker if in flight (so ball is visible flying toward goal)
     if (state.ballVisible && ballInFlight) {
@@ -940,17 +953,19 @@ function drawPlayer(x, y, team, pose) {
         ctx.fillRect(x - 22 + diveDir * 32, y - 12, 9, 9);
         ctx.fillStyle = '#222';
         ctx.fillRect(x - 22 + diveDir * 32, y - 14, 9, 3);
-    } else if (pose === 'kick') {
+    } else if (pose === 'kick' || pose === 'kickLeft') {
+        const leftFoot = (pose === 'kickLeft');
+        const s = leftFoot ? -1 : 1;  // mirror factor
         // Supporting leg + boot
         ctx.fillStyle = team.shirtColor;
-        ctx.fillRect(x - 5, y + 6, 6, 14);
+        ctx.fillRect(x - 5 * s - (leftFoot ? 1 : 0), y + 6, 6, 14);
         ctx.fillStyle = '#111';
-        ctx.fillRect(x - 6, y + 18, 8, 5);
+        ctx.fillRect(x - 6 * s - (leftFoot ? -1 : 0), y + 18, 8, 5);
         // Kicking leg (extended)
         ctx.fillStyle = team.shirtColor;
-        ctx.fillRect(x + 4, y - 2, 6, 14);
+        ctx.fillRect(x + 4 * s - (leftFoot ? 6 : 0), y - 2, 6, 14);
         ctx.fillStyle = '#111';
-        ctx.fillRect(x + 4, y + 10, 8, 5);
+        ctx.fillRect(x + 4 * s - (leftFoot ? 6 : 0), y + 10, 8, 5);
         // Shorts
         ctx.fillStyle = team.shortsColor;
         ctx.fillRect(x - 8, y - 6, 16, 11);
@@ -1263,12 +1278,8 @@ function updateGameplay() {
 
     switch (state.kickState) {
         case 'ready':
-            // Kicker walks up to the ball
-            if (state.kickerY > KICKER_BALL_Y) {
-                state.kickerY -= KICKER_WALK_SPEED;
-            }
-            if (state.stateTimer > 90 && state.kickerY <= KICKER_BALL_Y) {
-                state.kickerY = KICKER_BALL_Y;
+            // Kicker stands at starting position, show round info
+            if (state.stateTimer > 90) {
                 state.kickState = 'aiming';
                 state.stateTimer = 0;
             }
@@ -1283,7 +1294,7 @@ function updateGameplay() {
                 if (isKeyDown('arrowdown'))  state.aimY = Math.max(-1, state.aimY - 0.025);
 
                 if (wasKeyPressed(' ')) {
-                    state.kickState = 'charging';
+                    state.kickState = 'runup';
                     state.stateTimer = 0;
                 }
             } else {
@@ -1300,10 +1311,30 @@ function updateGameplay() {
                     const aiShot = aiChooseShot();
                     state.aiShotDirection = applyAccuracyPenalty(aiShot.x, aiShot.y, aiShot.power);
                     state.aiShotPower = aiShot.power;
-                    state.kickState = 'charging';
+                    state.kickState = 'runup';
                     state.stateTimer = 0;
-                    AudioEngine.playSfx('kick');
                 }
+            }
+            break;
+
+        case 'runup':
+            // Kicker runs toward the ball (converging on center X and ball Y)
+            if (state.kickerY > KICKER_BALL_Y) {
+                state.kickerY -= KICKER_WALK_SPEED * 2;  // faster run-up
+            }
+            // Move X toward center (ball position)
+            const targetX = CANVAS_WIDTH / 2;
+            const dxToCenter = targetX - state.kickerX;
+            if (Math.abs(dxToCenter) > 2) {
+                state.kickerX += dxToCenter * 0.08;  // ease toward center
+            } else {
+                state.kickerX = targetX;
+            }
+            if (state.kickerY <= KICKER_BALL_Y) {
+                state.kickerY = KICKER_BALL_Y;
+                state.kickerX = targetX;
+                state.kickState = 'charging';
+                state.stateTimer = 0;
             }
             break;
 
