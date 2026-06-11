@@ -79,6 +79,7 @@ function initGameState() {
         multiSuddenDeath: false,
         lastRoundResult: null,
         matchOverData: null,
+        pendingRoundStart: null,
         // Team selection
         selectedTeamIndex: 0,
         playerTeam: null,
@@ -1216,9 +1217,16 @@ function drawScoreboard() {
 
 // --- SCENE CONTROLLERS ---
 function updateTitle() {
+    // Start title music
+    if (typeof AudioEngine !== 'undefined') AudioEngine.playTrack('title');
+
     // Wait for any key
     for (const key in keysPressed) {
         if (keysPressed[key]) {
+            if (typeof AudioEngine !== 'undefined') {
+                AudioEngine.init();
+                AudioEngine.playSfx('confirm');
+            }
             state.scene = 'mode-select';
             return;
         }
@@ -1226,22 +1234,28 @@ function updateTitle() {
 }
 
 function updateTeamSelect() {
+    if (typeof AudioEngine !== 'undefined') AudioEngine.playTrack('team-select');
     const cols = 4;
 
     if (wasKeyPressed('arrowright')) {
         state.selectedTeamIndex = (state.selectedTeamIndex + 1) % TEAMS.length;
+        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('select');
     }
     if (wasKeyPressed('arrowleft')) {
         state.selectedTeamIndex = (state.selectedTeamIndex - 1 + TEAMS.length) % TEAMS.length;
+        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('select');
     }
     if (wasKeyPressed('arrowdown')) {
         state.selectedTeamIndex = (state.selectedTeamIndex + cols) % TEAMS.length;
+        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('select');
     }
     if (wasKeyPressed('arrowup')) {
         state.selectedTeamIndex = (state.selectedTeamIndex - cols + TEAMS.length) % TEAMS.length;
+        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('select');
     }
 
     if (wasKeyPressed('enter')) {
+        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('confirm');
         state.playerTeam = TEAMS[state.selectedTeamIndex];
 
         if (state.mode === 'multi') {
@@ -1272,6 +1286,8 @@ function updateTeamSelect() {
 }
 
 function updateGameplay() {
+    if (typeof AudioEngine !== 'undefined') AudioEngine.playTrack('gameplay');
+
     // Pause menu toggle (not available in multiplayer)
     if (wasKeyPressed('escape')) {
         if (state.mode === 'multi') {
@@ -1409,6 +1425,7 @@ function updateGameplay() {
                         state.power = Math.min(POWER_MAX, state.power + POWER_CHARGE_SPEED);
                     } else {
                         // Released — send kick action to server
+                        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('kick');
                         const power = state.power / POWER_MAX; // normalize to 0-1
                         Multiplayer.sendKickAction({ x: state.aimX, y: state.aimY }, power);
                         state.waitingForOpponent = true;
@@ -1421,6 +1438,7 @@ function updateGameplay() {
                     if (isKeyDown(' ')) {
                         state.power = Math.min(POWER_MAX, state.power + POWER_CHARGE_SPEED);
                     } else {
+                        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('kick');
                         const direction = applyAccuracyPenalty(state.aimX, state.aimY, state.power);
                         const target = calculateBallTarget(direction);
                         state.ballTargetX = target.x;
@@ -1432,6 +1450,7 @@ function updateGameplay() {
                     }
                 } else {
                     if (state.stateTimer > 45) {
+                        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('kick');
                         const target = calculateBallTarget(state.aiShotDirection);
                         state.ballTargetX = target.x;
                         state.ballTargetY = target.y;
@@ -1475,13 +1494,35 @@ function updateGameplay() {
             if (dist < BALL_FLIGHT_SPEED) {
                 if (state.mode === 'multi') {
                     // In multiplayer, result comes from lastRoundResult (already set by message handler)
-                    state.kickResult = state.lastRoundResult && state.lastRoundResult.goal ? 'goal' :
-                                       state.lastRoundResult && state.lastRoundResult.missed ? 'miss' : 'save';
+                    const rr = state.lastRoundResult;
+                    if (rr && rr.result) {
+                        // Server sends a 'result' string: 'goal', 'save', 'miss', 'post'
+                        state.kickResult = rr.result;
+                    } else if (rr && rr.goal) {
+                        state.kickResult = 'goal';
+                    } else if (rr && rr.missed) {
+                        state.kickResult = 'miss';
+                    } else {
+                        state.kickResult = 'save';
+                    }
+
+                    // Play outcome SFX
+                    if (state.kickResult === 'goal') AudioEngine.playSfx('goal');
+                    else if (state.kickResult === 'save') AudioEngine.playSfx('save');
+                    else if (state.kickResult === 'post') AudioEngine.playSfx('post');
+                    else AudioEngine.playSfx('miss');
+
                     state.kickState = 'outcome';
                     state.stateTimer = 0;
                 } else {
                     // Single player — determine result locally
                     state.kickResult = processKick(state.ballTargetX, state.ballTargetY, state.divePosition);
+
+                    // Play outcome SFX
+                    if (state.kickResult === 'goal') AudioEngine.playSfx('goal');
+                    else if (state.kickResult === 'save') AudioEngine.playSfx('save');
+                    else if (state.kickResult === 'post') AudioEngine.playSfx('post');
+                    else AudioEngine.playSfx('miss');
 
                     if (state.playerIsKicker) {
                         const scored = state.kickResult === 'goal';
@@ -1504,7 +1545,12 @@ function updateGameplay() {
                 if (state.mode === 'multi') {
                     // Check if match is over
                     if (state.matchOverData) {
+                        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('whistle');
                         state.scene = 'result';
+                    } else if (state.pendingRoundStart) {
+                        // round_start arrived during the animation — apply it now
+                        state.pendingRoundStart = null;
+                        resetKickState();
                     } else {
                         // Wait for next round_start from server
                         state.kickState = 'waiting';
@@ -1514,6 +1560,7 @@ function updateGameplay() {
                 } else {
                     const winner = checkWinner();
                     if (winner) {
+                        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('whistle');
                         state.scene = 'result';
                     } else {
                         state.kickState = 'next';
@@ -1525,7 +1572,15 @@ function updateGameplay() {
 
         case 'waiting':
             // Multiplayer only — waiting for next round_start from server
-            // The message handler will transition us to 'ready' when it arrives
+            // Check if a buffered round_start has arrived
+            if (state.pendingRoundStart) {
+                state.pendingRoundStart = null;
+                resetKickState();
+            }
+            // Also check if match ended while waiting
+            if (state.matchOverData) {
+                state.scene = 'result';
+            }
             break;
 
         case 'next':
@@ -1535,7 +1590,10 @@ function updateGameplay() {
 }
 
 function updateResult() {
+    if (typeof AudioEngine !== 'undefined') AudioEngine.playTrack('result');
+
     if (wasKeyPressed('enter')) {
+        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('confirm');
         if (state.mode === 'multi') {
             // In multiplayer, go back to mode select
             Multiplayer.disconnect();
@@ -1586,6 +1644,7 @@ function handleMultiplayerMessage(message) {
             state.multiRound = 1;
             state.multiSuddenDeath = false;
             state.matchOverData = null;
+            state.pendingRoundStart = null;
             state.waitingForOpponent = false;
             state.waitingForResult = false;
             state.playerIsKicker = (message.kickerRole === state.playerRole);
@@ -1601,7 +1660,13 @@ function handleMultiplayerMessage(message) {
             state.playerIsKicker = (message.kickerRole === state.playerRole);
             state.waitingForOpponent = false;
             state.waitingForResult = false;
-            resetKickState();
+            // If we're still in outcome phase, buffer this for when outcome finishes
+            if (state.kickState === 'outcome' || state.kickState === 'flight') {
+                state.pendingRoundStart = message;
+            } else {
+                state.pendingRoundStart = null;
+                resetKickState();
+            }
             // Update display scores
             state.playerScore = state.playerRole === 'player1' ? message.scores.player1 : message.scores.player2;
             state.aiScore = state.playerRole === 'player1' ? message.scores.player2 : message.scores.player1;
@@ -1618,6 +1683,13 @@ function handleMultiplayerMessage(message) {
             // Update scores
             state.playerScore = state.playerRole === 'player1' ? message.scores.player1 : message.scores.player2;
             state.aiScore = state.playerRole === 'player1' ? message.scores.player2 : message.scores.player1;
+            // Reset ball to penalty spot and keeper to center before animating
+            state.ballX = CANVAS_WIDTH / 2;
+            state.ballY = 480;
+            state.ballVisible = true;
+            state.keeperX = GOAL_X + GOAL_WIDTH / 2;
+            state.keeperY = GOAL_Y + GOAL_HEIGHT - 30;
+            state.keeperDiving = false;
             // Animate the result — set up ball target based on kick direction
             const kickDir = message.kickDirection;
             const target = calculateBallTarget(kickDir);
