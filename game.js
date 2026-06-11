@@ -717,12 +717,12 @@ function drawPitch() {
     // The goal line is at the "far" end, the kicker at the "near" end
     const goalLineY = 270;       // Where the goal line is drawn
     const pitchBottom = CANVAS_HEIGHT + 10;
-    const pitchTopLeft = 180;    // X edges at goal line
-    const pitchTopRight = CANVAS_WIDTH - 180;
-    const pitchBotLeft = -30;    // X edges at bottom (wider due to perspective)
-    const pitchBotRight = CANVAS_WIDTH + 30;
+    const pitchTopLeft = 100;    // X edges at goal line (wider for proper field look)
+    const pitchTopRight = CANVAS_WIDTH - 100;
+    const pitchBotLeft = -60;    // X edges at bottom (wider due to perspective)
+    const pitchBotRight = CANVAS_WIDTH + 60;
 
-    // Helper: get X bounds at a given Y
+    // Helper: get X bounds at a given Y (perspective interpolation)
     function getXAtY(y) {
         const t = (y - goalLineY) / (pitchBottom - goalLineY);
         const left = pitchTopLeft + t * (pitchBotLeft - pitchTopLeft);
@@ -750,88 +750,96 @@ function drawPitch() {
         ctx.fill();
     }
 
-    // Also fill a small strip behind goal line for the goal area background
+    // Fill area behind goal line (where the goal sits)
     ctx.fillStyle = '#2D8C2D';
-    ctx.fillRect(pitchTopLeft - 10, goalLineY - 40, pitchTopRight - pitchTopLeft + 20, 40);
+    ctx.fillRect(pitchTopLeft - 20, goalLineY - 50, pitchTopRight - pitchTopLeft + 40, 50);
 
     // --- PITCH MARKINGS ---
     ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 2.5;
 
-    // Goal line (the line the goal sits on)
+    // Goal line — runs the full width of the pitch at the top
     ctx.beginPath();
     ctx.moveTo(pitchTopLeft, goalLineY);
     ctx.lineTo(pitchTopRight, goalLineY);
     ctx.stroke();
 
-    // 18-yard box: only LEFT side, RIGHT side, and BOTTOM line (top is the goal line)
-    const box18BottomT = 0.48;  // How far down (as fraction of pitch depth)
+    // --- PENALTY AREA (18-yard box) ---
+    const box18BottomT = 0.42;
     const box18Y = goalLineY + box18BottomT * (pitchBottom - goalLineY);
+    const box18WidthFractionTop = 0.60;
+    const box18WidthFractionBot = 0.60;
+
+    const topWidth = pitchTopRight - pitchTopLeft;
     const box18Bounds = getXAtY(box18Y);
-    // Inset from pitch edges
-    const box18InsetTop = (pitchTopRight - pitchTopLeft) * 0.15;
-    const box18InsetBot = (box18Bounds.right - box18Bounds.left) * 0.15;
+    const botWidth = box18Bounds.right - box18Bounds.left;
 
-    const box18TopLeft = pitchTopLeft + box18InsetTop;
-    const box18TopRight = pitchTopRight - box18InsetTop;
-    const box18BotLeft = box18Bounds.left + box18InsetBot;
-    const box18BotRight = box18Bounds.right - box18InsetBot;
+    const box18TopLeft = pitchTopLeft + topWidth * (1 - box18WidthFractionTop) / 2;
+    const box18TopRight = pitchTopRight - topWidth * (1 - box18WidthFractionTop) / 2;
+    const box18BotLeft = box18Bounds.left + botWidth * (1 - box18WidthFractionBot) / 2;
+    const box18BotRight = box18Bounds.right - botWidth * (1 - box18WidthFractionBot) / 2;
 
-    // Left side of 18-yard box
+    // Left side
     ctx.beginPath();
     ctx.moveTo(box18TopLeft, goalLineY);
     ctx.lineTo(box18BotLeft, box18Y);
     ctx.stroke();
-    // Bottom of 18-yard box
+    // Bottom
     ctx.beginPath();
     ctx.moveTo(box18BotLeft, box18Y);
     ctx.lineTo(box18BotRight, box18Y);
     ctx.stroke();
-    // Right side of 18-yard box
+    // Right side
     ctx.beginPath();
     ctx.moveTo(box18TopRight, goalLineY);
     ctx.lineTo(box18BotRight, box18Y);
     ctx.stroke();
 
-    // 6-yard box: only LEFT, RIGHT, and BOTTOM (top is goal line)
-    const box6BottomT = 0.2;
+    // --- GOAL AREA (6-yard box) ---
+    const box6BottomT = 0.16;
     const box6Y = goalLineY + box6BottomT * (pitchBottom - goalLineY);
+    const box6WidthFractionTop = 0.30;
+    const box6WidthFractionBot = 0.30;
+
     const box6Bounds = getXAtY(box6Y);
-    const box6InsetTop = (pitchTopRight - pitchTopLeft) * 0.33;
-    const box6InsetBot = (box6Bounds.right - box6Bounds.left) * 0.33;
+    const box6BotWidth = box6Bounds.right - box6Bounds.left;
 
-    const box6TopLeft = pitchTopLeft + box6InsetTop;
-    const box6TopRight = pitchTopRight - box6InsetTop;
-    const box6BotLeft = box6Bounds.left + box6InsetBot;
-    const box6BotRight = box6Bounds.right - box6InsetBot;
+    const box6TopLeft = pitchTopLeft + topWidth * (1 - box6WidthFractionTop) / 2;
+    const box6TopRight = pitchTopRight - topWidth * (1 - box6WidthFractionTop) / 2;
+    const box6BotLeft = box6Bounds.left + box6BotWidth * (1 - box6WidthFractionBot) / 2;
+    const box6BotRight = box6Bounds.right - box6BotWidth * (1 - box6WidthFractionBot) / 2;
 
-    // Left side of 6-yard box
+    // Left side
     ctx.beginPath();
     ctx.moveTo(box6TopLeft, goalLineY);
     ctx.lineTo(box6BotLeft, box6Y);
     ctx.stroke();
-    // Bottom of 6-yard box
+    // Bottom
     ctx.beginPath();
     ctx.moveTo(box6BotLeft, box6Y);
     ctx.lineTo(box6BotRight, box6Y);
     ctx.stroke();
-    // Right side of 6-yard box
+    // Right side
     ctx.beginPath();
     ctx.moveTo(box6TopRight, goalLineY);
     ctx.lineTo(box6BotRight, box6Y);
     ctx.stroke();
 
-    // Penalty spot
-    const penSpotT = 0.38;
+    // --- PENALTY MARK ---
+    const penSpotT = 0.32;
     const penSpotY = goalLineY + penSpotT * (pitchBottom - goalLineY);
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
     ctx.arc(CANVAS_WIDTH / 2, penSpotY, 4, 0, Math.PI * 2);
     ctx.fill();
 
-    // Penalty arc (D shape) — the arc outside the box at the penalty spot
+    // --- PENALTY ARC (D shape) ---
+    // Endpoints touch the penalty area bottom line, arc bulges downward (toward kicker)
+    const arcRadius = 55;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 2.5;
     ctx.beginPath();
-    ctx.arc(CANVAS_WIDTH / 2, penSpotY, 55, Math.PI * 1.15, Math.PI * 1.85);
+    ctx.arc(CANVAS_WIDTH / 2, box18Y, arcRadius, 0, Math.PI);
     ctx.stroke();
 }
 
