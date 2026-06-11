@@ -126,6 +126,7 @@ function initGameState() {
         kickerY: KICKER_START_Y,
         kickerX: CANVAS_WIDTH / 2,
         kickerLeftFooted: Math.random() < 0.20,  // ~20% chance left-footed
+        heelKick: false,  // whether current kick is a heel kick
     };
 }
 
@@ -158,6 +159,7 @@ function resetKickState() {
     // Left-footed starts to the right of ball, right-footed starts to the left
     const sideOffset = 75 + Math.random() * 45;  // 75-120px offset (3x wider)
     state.kickerX = CANVAS_WIDTH / 2 + (state.kickerLeftFooted ? sideOffset : -sideOffset);
+    state.heelKick = false;
 }
 
 // --- INPUT HANDLER ---
@@ -479,8 +481,14 @@ function renderGameplay() {
     // Draw kicker
     const kickerTeam = state.playerIsKicker ? state.playerTeam : state.aiTeam;
     let kickerPose = 'stand';
-    if (state.kickState === 'flight' || state.kickState === 'outcome') {
-        kickerPose = state.kickerLeftFooted ? 'kickLeft' : 'kick';
+    if (state.kickState === 'turning') {
+        kickerPose = 'standBack';  // facing away from goal
+    } else if (state.kickState === 'flight' || state.kickState === 'outcome') {
+        if (state.heelKick) {
+            kickerPose = 'heel';
+        } else {
+            kickerPose = state.kickerLeftFooted ? 'kickLeft' : 'kick';
+        }
     }
     drawPlayer(state.kickerX, state.kickerY, kickerTeam, kickerPose);
 
@@ -1067,6 +1075,73 @@ function drawPlayer(x, y, team, pose) {
         ctx.fillRect(x - 5, y - 40, 10, 4);
         ctx.fillStyle = '#000';
         ctx.fillRect(x + 1, y - 34, 2, 2);
+    } else if (pose === 'standBack') {
+        // Standing facing away from camera (back to viewer) — for heel kick turn
+        // Legs + socks
+        ctx.fillStyle = team.shirtColor;
+        ctx.fillRect(x - 5, y + 4, 5, 16);
+        ctx.fillRect(x + 1, y + 4, 5, 16);
+        // Boots
+        ctx.fillStyle = '#111';
+        ctx.fillRect(x - 6, y + 18, 7, 5);
+        ctx.fillRect(x + 0, y + 18, 7, 5);
+        // Shorts
+        ctx.fillStyle = team.shortsColor;
+        ctx.fillRect(x - 8, y - 6, 16, 11);
+        // Torso (back of shirt — no collar detail visible, show number area)
+        ctx.fillStyle = team.shirtColor;
+        ctx.fillRect(x - 10, y - 28, 20, 23);
+        // Back number placeholder (dark rectangle)
+        ctx.fillStyle = darkenColor(team.shirtColor, 15);
+        ctx.fillRect(x - 5, y - 22, 10, 12);
+        // Sleeves
+        ctx.fillStyle = team.shirtColor;
+        ctx.fillRect(x - 13, y - 22, 4, 10);
+        ctx.fillRect(x + 10, y - 22, 4, 10);
+        // Arms (skin)
+        ctx.fillStyle = '#DDA87A';
+        ctx.fillRect(x - 13, y - 14, 3, 8);
+        ctx.fillRect(x + 11, y - 14, 3, 8);
+        // Head (back of head — just hair, no face)
+        ctx.fillStyle = '#222';
+        ctx.fillRect(x - 5, y - 38, 10, 12);
+    } else if (pose === 'heel') {
+        // Heel kick — player facing away from goal, kicking leg goes backward
+        // Legs: one forward (supporting), one kicked back behind
+        // Supporting leg
+        ctx.fillStyle = team.shirtColor;
+        ctx.fillRect(x - 4, y + 4, 6, 14);
+        ctx.fillStyle = '#111';
+        ctx.fillRect(x - 5, y + 16, 8, 5);
+        // Heel-kick leg (extended backward/down)
+        ctx.fillStyle = team.shirtColor;
+        ctx.fillRect(x + 2, y + 10, 6, 16);
+        ctx.fillStyle = '#111';
+        ctx.fillRect(x + 2, y + 24, 8, 5);
+        // Shorts
+        ctx.fillStyle = team.shortsColor;
+        ctx.fillRect(x - 8, y - 4, 16, 10);
+        // Torso (slightly leaned forward)
+        ctx.fillStyle = team.shirtColor;
+        ctx.fillRect(x - 10, y - 26, 20, 22);
+        ctx.fillStyle = darkenColor(team.shirtColor, 20);
+        ctx.fillRect(x - 10, y - 26, 20, 3);
+        // Sleeves
+        ctx.fillStyle = team.shirtColor;
+        ctx.fillRect(x - 13, y - 22, 4, 10);
+        ctx.fillRect(x + 10, y - 22, 4, 10);
+        // Arms (spread for balance)
+        ctx.fillStyle = '#DDA87A';
+        ctx.fillRect(x - 16, y - 18, 4, 8);
+        ctx.fillRect(x + 13, y - 18, 4, 8);
+        // Head
+        ctx.fillStyle = '#DDA87A';
+        ctx.fillRect(x - 5, y - 36, 10, 10);
+        ctx.fillStyle = '#222';
+        ctx.fillRect(x - 5, y - 38, 10, 4);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(x - 3, y - 32, 2, 2);
+        ctx.fillRect(x + 2, y - 32, 2, 2);
     } else {
         // Standing — FIFA 94 style, facing slightly away
         // Legs + socks
@@ -1200,7 +1275,7 @@ function drawAimIndicator(aimX, aimY) {
     ctx.fillStyle = '#FFF';
     ctx.font = '14px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('Arrow Keys to Aim  |  SPACE to Shoot', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 10);
+    ctx.fillText('Arrow Keys to Aim  |  SPACE to Shoot  |  SHIFT+SPACE Heel Kick', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 10);
 }
 
 function drawDiveSelector(selected) {
@@ -1409,7 +1484,13 @@ function updateGameplay() {
                     if (isKeyDown('arrowdown'))  state.aimY = Math.max(-1, state.aimY - 0.025);
 
                     if (wasKeyPressed(' ')) {
-                        state.kickState = 'runup';
+                        if (isKeyDown('shift')) {
+                            // Heel kick — skip power bar, instant cheeky flick
+                            state.heelKick = true;
+                            state.kickState = 'runup';
+                        } else {
+                            state.kickState = 'runup';
+                        }
                         state.stateTimer = 0;
                     }
                 } else {
@@ -1448,6 +1529,20 @@ function updateGameplay() {
             if (state.kickerY <= KICKER_BALL_Y) {
                 state.kickerY = KICKER_BALL_Y;
                 state.kickerX = targetX;
+                if (state.heelKick) {
+                    // Heel kick: pause to turn around before kicking
+                    state.kickState = 'turning';
+                } else {
+                    state.kickState = 'charging';
+                }
+                state.stateTimer = 0;
+            }
+            break;
+        }
+
+        case 'turning': {
+            // Heel kick: kicker pauses to turn around (~30 frames = 0.5s)
+            if (state.stateTimer > 30) {
                 state.kickState = 'charging';
                 state.stateTimer = 0;
             }
@@ -1470,9 +1565,20 @@ function updateGameplay() {
                     }
                 }
             } else {
-                // Single player charging (unchanged)
+                // Single player charging
                 if (state.playerIsKicker) {
-                    if (isKeyDown(' ')) {
+                    if (state.heelKick) {
+                        // Heel kick — instant shot, fixed low power, more accuracy
+                        state.power = 25 + Math.random() * 15;  // 25-40 power (cheeky)
+                        const direction = applyAccuracyPenalty(state.aimX, state.aimY, state.power * 0.5);  // more accurate
+                        const target = calculateBallTarget(direction);
+                        state.ballTargetX = target.x;
+                        state.ballTargetY = target.y;
+                        state.divePosition = aiChooseDive();
+                        state.keeperDiveTarget = DIVE_POSITIONS[state.divePosition];
+                        state.kickState = 'flight';
+                        state.stateTimer = 0;
+                    } else if (isKeyDown(' ')) {
                         state.power = Math.min(POWER_MAX, state.power + POWER_CHARGE_SPEED);
                     } else {
                         const direction = applyAccuracyPenalty(state.aimX, state.aimY, state.power);
@@ -1500,16 +1606,17 @@ function updateGameplay() {
 
         case 'flight': {
             // Animate ball toward target (same for both modes)
+            const ballSpeed = state.heelKick ? 4 : BALL_FLIGHT_SPEED;  // heel kicks are slower
             const dx = state.ballTargetX - state.ballX;
             const dy = state.ballTargetY - state.ballY;
             const dist = Math.sqrt(dx * dx + dy * dy);
 
-            if (dist < BALL_FLIGHT_SPEED) {
+            if (dist < ballSpeed) {
                 state.ballX = state.ballTargetX;
                 state.ballY = state.ballTargetY;
             } else {
-                state.ballX += (dx / dist) * BALL_FLIGHT_SPEED;
-                state.ballY += (dy / dist) * BALL_FLIGHT_SPEED;
+                state.ballX += (dx / dist) * ballSpeed;
+                state.ballY += (dy / dist) * ballSpeed;
             }
 
             // Animate keeper dive
@@ -1527,7 +1634,7 @@ function updateGameplay() {
             }
 
             // Check if ball reached target
-            if (dist < BALL_FLIGHT_SPEED) {
+            if (dist < ballSpeed) {
                 if (state.mode === 'multi') {
                     // In multiplayer, result comes from lastRoundResult (already set by message handler)
                     state.kickResult = state.lastRoundResult && state.lastRoundResult.goal ? 'goal' :
