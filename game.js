@@ -52,12 +52,33 @@ const TEAMS = [
     { name: 'South Korea', shirtColor: '#CC0000', shortsColor: '#FFFFFF' },
 ];
 
+// --- MULTIPLAYER CONFIG ---
+const WS_SERVER_URL = window.MULTIPLAYER_SERVER_URL || 'ws://localhost:3000';
+
 // --- GAME STATE ---
 let state = {};
 
 function initGameState() {
     state = {
         scene: 'title',
+        // Mode
+        mode: 'single', // 'single' or 'multi'
+        // Multiplayer state
+        roomCode: null,
+        playerRole: null, // 'player1' or 'player2' (multiplayer only)
+        connectionStatus: 'disconnected',
+        opponentTeam: null,
+        waitingForOpponent: false,
+        waitingForResult: false,
+        multiKickerRole: null, // who is kicking this round in multiplayer
+        lobbyState: 'menu', // 'menu', 'creating', 'waiting', 'joining', 'joining_input'
+        lobbyInput: '', // room code input
+        lobbyError: null,
+        multiScores: { player1: 0, player2: 0 },
+        multiRound: 1,
+        multiSuddenDeath: false,
+        lastRoundResult: null,
+        matchOverData: null,
         // Team selection
         selectedTeamIndex: 0,
         playerTeam: null,
@@ -303,6 +324,8 @@ function render() {
 
     switch (state.scene) {
         case 'title': renderTitle(); break;
+        case 'mode-select': renderModeSelect(); break;
+        case 'lobby': renderLobby(); break;
         case 'team-select': renderTeamSelect(); break;
         case 'gameplay': renderGameplay(); break;
         case 'result': renderResult(); break;
@@ -496,10 +519,28 @@ function renderGameplay() {
     }
 
     // ESC hint
-    ctx.fillStyle = '#666';
-    ctx.font = '12px monospace';
-    ctx.textAlign = 'right';
-    ctx.fillText('ESC = Menu', CANVAS_WIDTH - 10, CANVAS_HEIGHT - 8);
+    if (state.mode === 'multi') {
+        ctx.fillStyle = '#666';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText('ESC = Forfeit', CANVAS_WIDTH - 10, CANVAS_HEIGHT - 8);
+    } else {
+        ctx.fillStyle = '#666';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText('ESC = Menu', CANVAS_WIDTH - 10, CANVAS_HEIGHT - 8);
+    }
+
+    // Multiplayer: waiting overlay
+    if (state.mode === 'multi' && (state.waitingForOpponent || state.kickState === 'waiting')) {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(CANVAS_WIDTH / 2 - 180, CANVAS_HEIGHT / 2 - 25, 360, 50);
+        ctx.fillStyle = '#FFDD00';
+        ctx.font = '20px monospace';
+        ctx.textAlign = 'center';
+        const dots = '.'.repeat(Math.floor(Date.now() / 500) % 4);
+        ctx.fillText('Waiting for opponent' + dots, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 5);
+    }
 
     // Pause menu overlay
     if (state.paused) {
@@ -559,38 +600,81 @@ function renderResult() {
     ctx.fillStyle = '#1a1a2e';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    const winner = state.playerScore > state.aiScore ? state.playerTeam : state.aiTeam;
-    const isPlayerWin = state.playerScore > state.aiScore;
+    let isPlayerWin;
+    let winnerTeam;
 
-    // Trophy / celebration
-    ctx.fillStyle = '#FFD700';
-    ctx.font = 'bold 48px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(isPlayerWin ? 'YOU WIN!' : 'YOU LOSE!', CANVAS_WIDTH / 2, 150);
+    if (state.mode === 'multi' && state.matchOverData) {
+        if (state.matchOverData.disconnected) {
+            if (state.matchOverData.serverDown) {
+                // Server went down
+                ctx.fillStyle = '#FF4444';
+                ctx.font = 'bold 36px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('CONNECTION LOST', CANVAS_WIDTH / 2, 200);
+                ctx.fillStyle = '#CCC';
+                ctx.font = '22px monospace';
+                ctx.fillText('Server disconnected', CANVAS_WIDTH / 2, 260);
+            } else {
+                // Opponent disconnected
+                ctx.fillStyle = '#00FF00';
+                ctx.font = 'bold 48px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('YOU WIN!', CANVAS_WIDTH / 2, 200);
+                ctx.fillStyle = '#CCC';
+                ctx.font = '22px monospace';
+                ctx.fillText('Opponent disconnected', CANVAS_WIDTH / 2, 260);
+            }
+        } else {
+            isPlayerWin = state.matchOverData.winner === state.playerRole;
+            winnerTeam = isPlayerWin ? state.playerTeam : state.aiTeam;
 
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 36px monospace';
-    ctx.fillText(`${winner.name} wins!`, CANVAS_WIDTH / 2, 220);
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 48px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(isPlayerWin ? 'YOU WIN!' : 'YOU LOSE!', CANVAS_WIDTH / 2, 150);
 
-    // Final score
-    ctx.font = '28px monospace';
-    ctx.fillStyle = '#CCCCCC';
-    ctx.fillText(`${state.playerTeam.name}  ${state.playerScore} - ${state.aiScore}  ${state.aiTeam.name}`, CANVAS_WIDTH / 2, 300);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = 'bold 36px monospace';
+            ctx.fillText(`${winnerTeam.name} wins!`, CANVAS_WIDTH / 2, 220);
 
-    // Kick history
-    ctx.font = '18px monospace';
-    ctx.fillStyle = '#888';
-    let historyY = 360;
-    ctx.fillText('--- Kick History ---', CANVAS_WIDTH / 2, historyY);
-    historyY += 30;
+            ctx.font = '28px monospace';
+            ctx.fillStyle = '#CCCCCC';
+            ctx.fillText(`${state.playerTeam.name}  ${state.playerScore} - ${state.aiScore}  ${state.aiTeam.name}`, CANVAS_WIDTH / 2, 300);
+        }
+    } else {
+        // Single player result (unchanged)
+        const winner = state.playerScore > state.aiScore ? state.playerTeam : state.aiTeam;
+        isPlayerWin = state.playerScore > state.aiScore;
 
-    const maxKicks = Math.max(state.playerKicks.length, state.aiKicks.length);
-    for (let i = 0; i < maxKicks; i++) {
-        const pKick = i < state.playerKicks.length ? (state.playerKicks[i] ? '⚽' : '✗') : ' ';
-        const aKick = i < state.aiKicks.length ? (state.aiKicks[i] ? '⚽' : '✗') : ' ';
-        ctx.fillStyle = '#AAA';
-        ctx.fillText(`${pKick}   Round ${i + 1}   ${aKick}`, CANVAS_WIDTH / 2, historyY);
-        historyY += 25;
+        ctx.fillStyle = '#FFD700';
+        ctx.font = 'bold 48px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(isPlayerWin ? 'YOU WIN!' : 'YOU LOSE!', CANVAS_WIDTH / 2, 150);
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 36px monospace';
+        ctx.fillText(`${winner.name} wins!`, CANVAS_WIDTH / 2, 220);
+
+        // Final score
+        ctx.font = '28px monospace';
+        ctx.fillStyle = '#CCCCCC';
+        ctx.fillText(`${state.playerTeam.name}  ${state.playerScore} - ${state.aiScore}  ${state.aiTeam.name}`, CANVAS_WIDTH / 2, 300);
+
+        // Kick history
+        ctx.font = '18px monospace';
+        ctx.fillStyle = '#888';
+        let historyY = 360;
+        ctx.fillText('--- Kick History ---', CANVAS_WIDTH / 2, historyY);
+        historyY += 30;
+
+        const maxKicks = Math.max(state.playerKicks.length, state.aiKicks.length);
+        for (let i = 0; i < maxKicks; i++) {
+            const pKick = i < state.playerKicks.length ? (state.playerKicks[i] ? '⚽' : '✗') : ' ';
+            const aKick = i < state.aiKicks.length ? (state.aiKicks[i] ? '⚽' : '✗') : ' ';
+            ctx.fillStyle = '#AAA';
+            ctx.fillText(`${pKick}   Round ${i + 1}   ${aKick}`, CANVAS_WIDTH / 2, historyY);
+            historyY += 25;
+        }
     }
 
     // Replay prompt
@@ -598,7 +682,8 @@ function renderResult() {
     if (blink) {
         ctx.fillStyle = '#88FF88';
         ctx.font = '22px monospace';
-        ctx.fillText('PRESS ENTER TO PLAY AGAIN', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 50);
+        ctx.textAlign = 'center';
+        ctx.fillText('PRESS ENTER TO CONTINUE', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 50);
     }
 }
 
@@ -1134,7 +1219,7 @@ function updateTitle() {
     // Wait for any key
     for (const key in keysPressed) {
         if (keysPressed[key]) {
-            state.scene = 'team-select';
+            state.scene = 'mode-select';
             return;
         }
     }
@@ -1158,36 +1243,49 @@ function updateTeamSelect() {
 
     if (wasKeyPressed('enter')) {
         state.playerTeam = TEAMS[state.selectedTeamIndex];
-        // Pick random AI team (different from player)
-        let aiIndex;
-        do {
-            aiIndex = Math.floor(Math.random() * TEAMS.length);
-        } while (aiIndex === state.selectedTeamIndex);
-        state.aiTeam = TEAMS[aiIndex];
 
-        // Reset scores and start gameplay
-        state.round = 1;
-        state.playerScore = 0;
-        state.aiScore = 0;
-        state.playerKicks = [];
-        state.aiKicks = [];
-        state.playerIsKicker = true;
-        state.suddenDeath = false;
-        state.suddenDeathRound = 0;
-        resetKickState();
-        state.scene = 'gameplay';
+        if (state.mode === 'multi') {
+            // In multiplayer, send team selection to server
+            Multiplayer.sendTeamSelection(state.playerTeam.name);
+            state.waitingForOpponent = true;
+        } else {
+            // Single player — pick random AI team (different from player)
+            let aiIndex;
+            do {
+                aiIndex = Math.floor(Math.random() * TEAMS.length);
+            } while (aiIndex === state.selectedTeamIndex);
+            state.aiTeam = TEAMS[aiIndex];
+
+            // Reset scores and start gameplay
+            state.round = 1;
+            state.playerScore = 0;
+            state.aiScore = 0;
+            state.playerKicks = [];
+            state.aiKicks = [];
+            state.playerIsKicker = true;
+            state.suddenDeath = false;
+            state.suddenDeathRound = 0;
+            resetKickState();
+            state.scene = 'gameplay';
+        }
     }
 }
 
 function updateGameplay() {
-    // Pause menu toggle
+    // Pause menu toggle (not available in multiplayer)
     if (wasKeyPressed('escape')) {
+        if (state.mode === 'multi') {
+            // In multiplayer, ESC disconnects and forfeits
+            Multiplayer.disconnect();
+            state.scene = 'mode-select';
+            return;
+        }
         state.paused = !state.paused;
         state.pauseSelection = 0;
         return;
     }
 
-    // Handle pause menu input
+    // Handle pause menu input (single-player only)
     if (state.paused) {
         if (wasKeyPressed('arrowup')) {
             state.pauseSelection = (state.pauseSelection - 1 + 3) % 3;
@@ -1221,6 +1319,17 @@ function updateGameplay() {
         return;
     }
 
+    // Multiplayer: waiting for result from server
+    if (state.mode === 'multi' && state.waitingForResult) {
+        // Just wait — the multiplayer message handler will advance the state
+        return;
+    }
+
+    // Multiplayer: waiting for opponent's action
+    if (state.mode === 'multi' && state.waitingForOpponent) {
+        return;
+    }
+
     state.stateTimer++;
 
     switch (state.kickState) {
@@ -1232,71 +1341,110 @@ function updateGameplay() {
             break;
 
         case 'aiming':
-            if (state.playerIsKicker) {
-                // Player aims
-                if (isKeyDown('arrowleft'))  state.aimX = Math.max(-1, state.aimX - 0.025);
-                if (isKeyDown('arrowright')) state.aimX = Math.min(1, state.aimX + 0.025);
-                if (isKeyDown('arrowup'))    state.aimY = Math.min(1, state.aimY + 0.025);
-                if (isKeyDown('arrowdown'))  state.aimY = Math.max(-1, state.aimY - 0.025);
+            if (state.mode === 'multi') {
+                // Multiplayer aiming
+                const isLocalKicker = state.multiKickerRole === state.playerRole;
+                if (isLocalKicker) {
+                    // Player aims
+                    if (isKeyDown('arrowleft'))  state.aimX = Math.max(-1, state.aimX - 0.025);
+                    if (isKeyDown('arrowright')) state.aimX = Math.min(1, state.aimX + 0.025);
+                    if (isKeyDown('arrowup'))    state.aimY = Math.min(1, state.aimY + 0.025);
+                    if (isKeyDown('arrowdown'))  state.aimY = Math.max(-1, state.aimY - 0.025);
 
-                if (wasKeyPressed(' ')) {
-                    state.kickState = 'charging';
-                    state.stateTimer = 0;
+                    if (wasKeyPressed(' ')) {
+                        state.kickState = 'charging';
+                        state.stateTimer = 0;
+                    }
+                } else {
+                    // Player is keeper — choose dive position
+                    if (wasKeyPressed('q')) state.selectedDive = 'top-left';
+                    if (wasKeyPressed('a')) state.selectedDive = 'bottom-left';
+                    if (wasKeyPressed('w')) state.selectedDive = 'center';
+                    if (wasKeyPressed('e')) state.selectedDive = 'top-right';
+                    if (wasKeyPressed('d')) state.selectedDive = 'bottom-right';
+
+                    if (wasKeyPressed(' ')) {
+                        // Send dive action to server
+                        Multiplayer.sendDiveAction(state.selectedDive);
+                        state.waitingForOpponent = true;
+                    }
                 }
             } else {
-                // Player is keeper — choose dive position
-                if (wasKeyPressed('q')) state.selectedDive = 'top-left';
-                if (wasKeyPressed('a')) state.selectedDive = 'bottom-left';
-                if (wasKeyPressed('w')) state.selectedDive = 'center';
-                if (wasKeyPressed('e')) state.selectedDive = 'top-right';
-                if (wasKeyPressed('d')) state.selectedDive = 'bottom-right';
+                // Single player aiming (unchanged)
+                if (state.playerIsKicker) {
+                    if (isKeyDown('arrowleft'))  state.aimX = Math.max(-1, state.aimX - 0.025);
+                    if (isKeyDown('arrowright')) state.aimX = Math.min(1, state.aimX + 0.025);
+                    if (isKeyDown('arrowup'))    state.aimY = Math.min(1, state.aimY + 0.025);
+                    if (isKeyDown('arrowdown'))  state.aimY = Math.max(-1, state.aimY - 0.025);
 
-                if (wasKeyPressed(' ')) {
-                    state.divePosition = state.selectedDive;
-                    // AI decides shot
-                    const aiShot = aiChooseShot();
-                    state.aiShotDirection = applyAccuracyPenalty(aiShot.x, aiShot.y, aiShot.power);
-                    state.aiShotPower = aiShot.power;
-                    state.kickState = 'charging';
-                    state.stateTimer = 0;
+                    if (wasKeyPressed(' ')) {
+                        state.kickState = 'charging';
+                        state.stateTimer = 0;
+                    }
+                } else {
+                    if (wasKeyPressed('q')) state.selectedDive = 'top-left';
+                    if (wasKeyPressed('a')) state.selectedDive = 'bottom-left';
+                    if (wasKeyPressed('w')) state.selectedDive = 'center';
+                    if (wasKeyPressed('e')) state.selectedDive = 'top-right';
+                    if (wasKeyPressed('d')) state.selectedDive = 'bottom-right';
+
+                    if (wasKeyPressed(' ')) {
+                        state.divePosition = state.selectedDive;
+                        const aiShot = aiChooseShot();
+                        state.aiShotDirection = applyAccuracyPenalty(aiShot.x, aiShot.y, aiShot.power);
+                        state.aiShotPower = aiShot.power;
+                        state.kickState = 'charging';
+                        state.stateTimer = 0;
+                    }
                 }
             }
             break;
 
         case 'charging':
-            if (state.playerIsKicker) {
-                // Power bar charges while space held
-                if (isKeyDown(' ')) {
-                    state.power = Math.min(POWER_MAX, state.power + POWER_CHARGE_SPEED);
-                } else {
-                    // Released — kick!
-                    const direction = applyAccuracyPenalty(state.aimX, state.aimY, state.power);
-                    const target = calculateBallTarget(direction);
-                    state.ballTargetX = target.x;
-                    state.ballTargetY = target.y;
-
-                    // AI keeper dives
-                    state.divePosition = aiChooseDive();
-                    state.keeperDiveTarget = DIVE_POSITIONS[state.divePosition];
-
-                    state.kickState = 'flight';
-                    state.stateTimer = 0;
+            if (state.mode === 'multi') {
+                // Multiplayer charging — only kicker charges
+                const isLocalKicker = state.multiKickerRole === state.playerRole;
+                if (isLocalKicker) {
+                    if (isKeyDown(' ')) {
+                        state.power = Math.min(POWER_MAX, state.power + POWER_CHARGE_SPEED);
+                    } else {
+                        // Released — send kick action to server
+                        const power = state.power / POWER_MAX; // normalize to 0-1
+                        Multiplayer.sendKickAction({ x: state.aimX, y: state.aimY }, power);
+                        state.waitingForOpponent = true;
+                        state.waitingForResult = true;
+                    }
                 }
             } else {
-                // AI is winding up (brief delay for drama)
-                if (state.stateTimer > 45) {
-                    const target = calculateBallTarget(state.aiShotDirection);
-                    state.ballTargetX = target.x;
-                    state.ballTargetY = target.y;
-                    state.keeperDiveTarget = DIVE_POSITIONS[state.divePosition];
-                    state.kickState = 'flight';
-                    state.stateTimer = 0;
+                // Single player charging (unchanged)
+                if (state.playerIsKicker) {
+                    if (isKeyDown(' ')) {
+                        state.power = Math.min(POWER_MAX, state.power + POWER_CHARGE_SPEED);
+                    } else {
+                        const direction = applyAccuracyPenalty(state.aimX, state.aimY, state.power);
+                        const target = calculateBallTarget(direction);
+                        state.ballTargetX = target.x;
+                        state.ballTargetY = target.y;
+                        state.divePosition = aiChooseDive();
+                        state.keeperDiveTarget = DIVE_POSITIONS[state.divePosition];
+                        state.kickState = 'flight';
+                        state.stateTimer = 0;
+                    }
+                } else {
+                    if (state.stateTimer > 45) {
+                        const target = calculateBallTarget(state.aiShotDirection);
+                        state.ballTargetX = target.x;
+                        state.ballTargetY = target.y;
+                        state.keeperDiveTarget = DIVE_POSITIONS[state.divePosition];
+                        state.kickState = 'flight';
+                        state.stateTimer = 0;
+                    }
                 }
             }
             break;
 
         case 'flight':
-            // Animate ball toward target
+            // Animate ball toward target (same for both modes)
             const dx = state.ballTargetX - state.ballX;
             const dy = state.ballTargetY - state.ballY;
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1325,50 +1473,401 @@ function updateGameplay() {
 
             // Check if ball reached target
             if (dist < BALL_FLIGHT_SPEED) {
-                // Determine result
-                state.kickResult = processKick(state.ballTargetX, state.ballTargetY, state.divePosition);
-
-                // Record result
-                if (state.playerIsKicker) {
-                    const scored = state.kickResult === 'goal';
-                    state.playerKicks.push(scored);
-                    if (scored) state.playerScore++;
+                if (state.mode === 'multi') {
+                    // In multiplayer, result comes from lastRoundResult (already set by message handler)
+                    state.kickResult = state.lastRoundResult && state.lastRoundResult.goal ? 'goal' :
+                                       state.lastRoundResult && state.lastRoundResult.missed ? 'miss' : 'save';
+                    state.kickState = 'outcome';
+                    state.stateTimer = 0;
                 } else {
-                    const scored = state.kickResult === 'goal';
-                    state.aiKicks.push(scored);
-                    if (scored) state.aiScore++;
-                }
+                    // Single player — determine result locally
+                    state.kickResult = processKick(state.ballTargetX, state.ballTargetY, state.divePosition);
 
-                state.kickState = 'outcome';
-                state.stateTimer = 0;
-            }
-            break;
+                    if (state.playerIsKicker) {
+                        const scored = state.kickResult === 'goal';
+                        state.playerKicks.push(scored);
+                        if (scored) state.playerScore++;
+                    } else {
+                        const scored = state.kickResult === 'goal';
+                        state.aiKicks.push(scored);
+                        if (scored) state.aiScore++;
+                    }
 
-        case 'outcome':
-            if (state.stateTimer > 90) {
-                // Check if shootout is over
-                const winner = checkWinner();
-                if (winner) {
-                    state.scene = 'result';
-                } else {
-                    state.kickState = 'next';
+                    state.kickState = 'outcome';
                     state.stateTimer = 0;
                 }
             }
             break;
 
+        case 'outcome':
+            if (state.stateTimer > 90) {
+                if (state.mode === 'multi') {
+                    // Check if match is over
+                    if (state.matchOverData) {
+                        state.scene = 'result';
+                    } else {
+                        // Wait for next round_start from server
+                        state.kickState = 'waiting';
+                        state.waitingForOpponent = false;
+                        state.waitingForResult = false;
+                    }
+                } else {
+                    const winner = checkWinner();
+                    if (winner) {
+                        state.scene = 'result';
+                    } else {
+                        state.kickState = 'next';
+                        state.stateTimer = 0;
+                    }
+                }
+            }
+            break;
+
+        case 'waiting':
+            // Multiplayer only — waiting for next round_start from server
+            // The message handler will transition us to 'ready' when it arrives
+            break;
+
         case 'next':
             advanceRound();
-            // kickState is reset by advanceRound via resetKickState
             break;
     }
 }
 
 function updateResult() {
     if (wasKeyPressed('enter')) {
-        state.scene = 'team-select';
-        state.selectedTeamIndex = 0;
+        if (state.mode === 'multi') {
+            // In multiplayer, go back to mode select
+            Multiplayer.disconnect();
+            state.scene = 'mode-select';
+        } else {
+            state.scene = 'team-select';
+            state.selectedTeamIndex = 0;
+        }
     }
+}
+
+// --- MULTIPLAYER MESSAGE HANDLER ---
+function handleMultiplayerMessage(message) {
+    switch (message.type) {
+        case 'room_created':
+            state.roomCode = message.roomCode;
+            state.playerRole = 'player1';
+            state.lobbyState = 'waiting';
+            state.lobbyError = null;
+            break;
+
+        case 'room_joined':
+            state.roomCode = message.roomCode;
+            state.playerRole = message.playerRole;
+            state.lobbyState = 'waiting';
+            state.lobbyError = null;
+            // Advance to team select
+            state.scene = 'team-select';
+            state.selectedTeamIndex = 0;
+            break;
+
+        case 'opponent_joined':
+            // Player 1 gets notified that player 2 joined
+            state.scene = 'team-select';
+            state.selectedTeamIndex = 0;
+            break;
+
+        case 'opponent_team_selected':
+            state.opponentTeam = TEAMS.find(t => t.name === message.teamId) || TEAMS[0];
+            break;
+
+        case 'match_start':
+            state.playerRole = message.playerRole;
+            state.opponentTeam = TEAMS.find(t => t.name === message.opponentTeam) || TEAMS[0];
+            state.aiTeam = state.opponentTeam; // Reuse aiTeam for opponent display
+            state.multiKickerRole = message.kickerRole;
+            state.multiScores = { player1: 0, player2: 0 };
+            state.multiRound = 1;
+            state.multiSuddenDeath = false;
+            state.matchOverData = null;
+            state.waitingForOpponent = false;
+            state.waitingForResult = false;
+            state.playerIsKicker = (message.kickerRole === state.playerRole);
+            resetKickState();
+            state.scene = 'gameplay';
+            break;
+
+        case 'round_start':
+            state.multiKickerRole = message.kickerRole;
+            state.multiRound = message.round;
+            state.multiSuddenDeath = message.suddenDeath;
+            state.multiScores = message.scores;
+            state.playerIsKicker = (message.kickerRole === state.playerRole);
+            state.waitingForOpponent = false;
+            state.waitingForResult = false;
+            resetKickState();
+            // Update display scores
+            state.playerScore = state.playerRole === 'player1' ? message.scores.player1 : message.scores.player2;
+            state.aiScore = state.playerRole === 'player1' ? message.scores.player2 : message.scores.player1;
+            break;
+
+        case 'waiting_for_opponent':
+            state.waitingForOpponent = true;
+            break;
+
+        case 'round_result':
+            state.lastRoundResult = message;
+            state.waitingForOpponent = false;
+            state.waitingForResult = false;
+            // Update scores
+            state.playerScore = state.playerRole === 'player1' ? message.scores.player1 : message.scores.player2;
+            state.aiScore = state.playerRole === 'player1' ? message.scores.player2 : message.scores.player1;
+            // Animate the result — set up ball target based on kick direction
+            const kickDir = message.kickDirection;
+            const target = calculateBallTarget(kickDir);
+            state.ballTargetX = target.x;
+            state.ballTargetY = target.y;
+            state.divePosition = message.divePosition;
+            state.keeperDiveTarget = DIVE_POSITIONS[message.divePosition];
+            state.kickState = 'flight';
+            state.stateTimer = 0;
+            break;
+
+        case 'match_over':
+            state.matchOverData = message;
+            // Scores are updated in result rendering
+            state.playerScore = state.playerRole === 'player1' ? message.scores.player1 : message.scores.player2;
+            state.aiScore = state.playerRole === 'player1' ? message.scores.player2 : message.scores.player1;
+            break;
+
+        case 'opponent_disconnected':
+            state.matchOverData = { winner: state.playerRole, disconnected: true };
+            state.scene = 'result';
+            break;
+
+        case 'error':
+            state.lobbyError = message.message;
+            break;
+    }
+}
+
+// --- MODE SELECT ---
+function updateModeSelect() {
+    if (!state.modeSelection) state.modeSelection = 0;
+
+    if (wasKeyPressed('arrowup') || wasKeyPressed('arrowdown')) {
+        state.modeSelection = state.modeSelection === 0 ? 1 : 0;
+    }
+
+    if (wasKeyPressed('enter')) {
+        if (state.modeSelection === 0) {
+            // Single player
+            state.mode = 'single';
+            state.scene = 'team-select';
+            state.selectedTeamIndex = 0;
+        } else {
+            // Multiplayer
+            state.mode = 'multi';
+            state.lobbyState = 'menu';
+            state.lobbyInput = '';
+            state.lobbyError = null;
+            state.roomCode = null;
+            // Connect to server
+            Multiplayer.connect(WS_SERVER_URL);
+            Multiplayer.onMessage(handleMultiplayerMessage);
+            Multiplayer.onDisconnect(() => {
+                if (state.scene === 'gameplay') {
+                    state.matchOverData = { winner: null, disconnected: true, serverDown: true };
+                    state.scene = 'result';
+                } else {
+                    state.lobbyError = 'Lost connection to server';
+                    state.lobbyState = 'menu';
+                }
+            });
+            state.scene = 'lobby';
+        }
+    }
+}
+
+function renderModeSelect() {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 36px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('SELECT MODE', CANVAS_WIDTH / 2, 150);
+
+    const options = ['SINGLE PLAYER (vs AI)', 'MULTIPLAYER (1v1 Online)'];
+    const sel = state.modeSelection || 0;
+
+    for (let i = 0; i < options.length; i++) {
+        const y = 280 + i * 80;
+        const isSelected = i === sel;
+
+        if (isSelected) {
+            ctx.fillStyle = '#FFD700';
+            ctx.fillRect(CANVAS_WIDTH / 2 - 220, y - 25, 440, 50);
+            ctx.fillStyle = '#000';
+        } else {
+            ctx.fillStyle = '#666';
+            ctx.fillRect(CANVAS_WIDTH / 2 - 220, y - 25, 440, 50);
+            ctx.fillStyle = '#CCC';
+        }
+
+        ctx.font = 'bold 24px monospace';
+        ctx.fillText(options[i], CANVAS_WIDTH / 2, y + 8);
+    }
+
+    ctx.fillStyle = '#888';
+    ctx.font = '16px monospace';
+    ctx.fillText('↑↓ to Select  |  ENTER to Confirm', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 40);
+}
+
+// --- LOBBY ---
+function updateLobby() {
+    if (wasKeyPressed('escape')) {
+        Multiplayer.disconnect();
+        state.scene = 'mode-select';
+        return;
+    }
+
+    switch (state.lobbyState) {
+        case 'menu':
+            if (!state.lobbySelection) state.lobbySelection = 0;
+            if (wasKeyPressed('arrowup') || wasKeyPressed('arrowdown')) {
+                state.lobbySelection = state.lobbySelection === 0 ? 1 : 0;
+            }
+            if (wasKeyPressed('enter')) {
+                if (state.lobbySelection === 0) {
+                    // Create room
+                    state.lobbyState = 'creating';
+                    Multiplayer.createRoom();
+                } else {
+                    // Join room
+                    state.lobbyState = 'joining_input';
+                    state.lobbyInput = '';
+                }
+            }
+            break;
+
+        case 'joining_input':
+            // Capture typed characters for room code
+            for (const key in keysPressed) {
+                if (keysPressed[key] && key.length === 1 && state.lobbyInput.length < 5) {
+                    state.lobbyInput += key.toUpperCase();
+                }
+            }
+            if (wasKeyPressed('backspace') && state.lobbyInput.length > 0) {
+                state.lobbyInput = state.lobbyInput.slice(0, -1);
+            }
+            if (wasKeyPressed('enter') && state.lobbyInput.length >= 4) {
+                state.lobbyState = 'joining';
+                Multiplayer.joinRoom(state.lobbyInput);
+            }
+            break;
+
+        case 'creating':
+        case 'joining':
+        case 'waiting':
+            // Waiting for server response — handled by message handler
+            break;
+    }
+}
+
+function renderLobby() {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 32px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('MULTIPLAYER LOBBY', CANVAS_WIDTH / 2, 80);
+
+    // Connection status
+    const connStatus = Multiplayer.getConnectionStatus();
+    ctx.fillStyle = connStatus === 'connected' ? '#00FF00' : connStatus === 'connecting' ? '#FFAA00' : '#FF4444';
+    ctx.font = '14px monospace';
+    ctx.fillText('● ' + connStatus.toUpperCase(), CANVAS_WIDTH / 2, 110);
+
+    switch (state.lobbyState) {
+        case 'menu':
+            const options = ['CREATE ROOM', 'JOIN ROOM'];
+            const sel = state.lobbySelection || 0;
+            for (let i = 0; i < options.length; i++) {
+                const y = 250 + i * 80;
+                const isSelected = i === sel;
+                if (isSelected) {
+                    ctx.fillStyle = '#FFD700';
+                    ctx.fillRect(CANVAS_WIDTH / 2 - 180, y - 25, 360, 50);
+                    ctx.fillStyle = '#000';
+                } else {
+                    ctx.fillStyle = '#444';
+                    ctx.fillRect(CANVAS_WIDTH / 2 - 180, y - 25, 360, 50);
+                    ctx.fillStyle = '#CCC';
+                }
+                ctx.font = 'bold 24px monospace';
+                ctx.fillText(options[i], CANVAS_WIDTH / 2, y + 8);
+            }
+            break;
+
+        case 'creating':
+            ctx.fillStyle = '#FFF';
+            ctx.font = '22px monospace';
+            ctx.fillText('Creating room...', CANVAS_WIDTH / 2, 280);
+            break;
+
+        case 'waiting':
+            ctx.fillStyle = '#FFF';
+            ctx.font = '22px monospace';
+            ctx.fillText('Room Code:', CANVAS_WIDTH / 2, 240);
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 64px monospace';
+            ctx.fillText(state.roomCode || '...', CANVAS_WIDTH / 2, 320);
+            ctx.fillStyle = '#888';
+            ctx.font = '18px monospace';
+            ctx.fillText('Share this code with your opponent', CANVAS_WIDTH / 2, 370);
+            // Blinking waiting text
+            const blink = Math.floor(Date.now() / 600) % 2;
+            if (blink) {
+                ctx.fillStyle = '#AAFFAA';
+                ctx.font = '20px monospace';
+                ctx.fillText('Waiting for opponent to join...', CANVAS_WIDTH / 2, 430);
+            }
+            break;
+
+        case 'joining_input':
+            ctx.fillStyle = '#FFF';
+            ctx.font = '22px monospace';
+            ctx.fillText('Enter Room Code:', CANVAS_WIDTH / 2, 240);
+            // Input field
+            ctx.fillStyle = '#333';
+            ctx.fillRect(CANVAS_WIDTH / 2 - 120, 270, 240, 60);
+            ctx.strokeStyle = '#FFD700';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(CANVAS_WIDTH / 2 - 120, 270, 240, 60);
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 40px monospace';
+            ctx.fillText(state.lobbyInput + (Math.floor(Date.now() / 500) % 2 ? '_' : ''), CANVAS_WIDTH / 2, 310);
+            ctx.fillStyle = '#888';
+            ctx.font = '16px monospace';
+            ctx.fillText('Type code and press ENTER', CANVAS_WIDTH / 2, 360);
+            break;
+
+        case 'joining':
+            ctx.fillStyle = '#FFF';
+            ctx.font = '22px monospace';
+            ctx.fillText('Joining room...', CANVAS_WIDTH / 2, 280);
+            break;
+    }
+
+    // Error display
+    if (state.lobbyError) {
+        ctx.fillStyle = '#FF4444';
+        ctx.font = '18px monospace';
+        ctx.fillText(state.lobbyError, CANVAS_WIDTH / 2, CANVAS_HEIGHT - 80);
+    }
+
+    // ESC hint
+    ctx.fillStyle = '#666';
+    ctx.font = '14px monospace';
+    ctx.fillText('ESC = Back to Mode Select', CANVAS_WIDTH / 2, CANVAS_HEIGHT - 30);
 }
 
 // --- GAME LOOP ---
@@ -1376,6 +1875,8 @@ function gameLoop() {
     // Update
     switch (state.scene) {
         case 'title': updateTitle(); break;
+        case 'mode-select': updateModeSelect(); break;
+        case 'lobby': updateLobby(); break;
         case 'team-select': updateTeamSelect(); break;
         case 'gameplay': updateGameplay(); break;
         case 'result': updateResult(); break;
