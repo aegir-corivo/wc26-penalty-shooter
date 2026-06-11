@@ -1427,6 +1427,15 @@ function updateResult() {
 
 // --- GAME LOOP ---
 function gameLoop() {
+    // Global mute toggle (M key works in any scene)
+    if (wasKeyPressed('m')) {
+        AudioEngine.toggleMute();
+        const muteBtn = document.getElementById('mute-btn');
+        const muted = AudioEngine.isMuted();
+        muteBtn.textContent = muted ? '🔇' : '🔊';
+        muteBtn.setAttribute('aria-label', muted ? 'Unmute audio' : 'Mute audio');
+    }
+
     // Update
     switch (state.scene) {
         case 'title': updateTitle(); break;
@@ -1437,6 +1446,19 @@ function gameLoop() {
 
     // Render
     render();
+
+    // Mute indicator (always visible in corner)
+    if (AudioEngine.isMuted()) {
+        ctx.fillStyle = '#FF4444';
+        ctx.font = '14px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('🔇 MUTED (M)', 10, CANVAS_HEIGHT - 8);
+    } else {
+        ctx.fillStyle = '#666';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('M = Mute', 10, CANVAS_HEIGHT - 8);
+    }
 
     // Reset frame input
     resetFrameInput();
@@ -1457,6 +1479,17 @@ function startGame() {
     };
     document.addEventListener('keydown', initAudioOnce);
     document.addEventListener('click', initAudioOnce);
+
+    // Mute button
+    const muteBtn = document.getElementById('mute-btn');
+    muteBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        AudioEngine.init();
+        const muted = AudioEngine.toggleMute();
+        muteBtn.textContent = muted ? '🔇' : '🔊';
+        muteBtn.setAttribute('aria-label', muted ? 'Unmute audio' : 'Mute audio');
+    });
+
     requestAnimationFrame(gameLoop);
 }
 
