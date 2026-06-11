@@ -14,6 +14,10 @@ const POWER_MAX = 100;
 const POWER_CHARGE_SPEED = 1.8;
 const BALL_FLIGHT_SPEED = 8;
 const KICK_ROUNDS = 5;
+const PENALTY_SPOT_Y = 379;     // Where the ball sits (matches pitch drawing)
+const KICKER_START_Y = 550;     // Kicker run-up starting position
+const KICKER_BALL_Y = PENALTY_SPOT_Y + 18;  // Kicker stands just behind ball
+const KICKER_WALK_SPEED = 2.5;  // Pixels per frame during run-up
 
 // Dive positions: { label, x, y } relative to goal
 const DIVE_POSITIONS = {
@@ -96,7 +100,7 @@ function initGameState() {
         aimY: 0,        // -1 to 1 (down to up)
         power: 0,
         ballX: CANVAS_WIDTH / 2,
-        ballY: 480,
+        ballY: PENALTY_SPOT_Y,
         ballTargetX: 0,
         ballTargetY: 0,
         ballVisible: true,
@@ -1359,7 +1363,7 @@ function updateGameplay() {
             }
             break;
 
-        case 'aiming':
+        case 'aiming': {
             if (state.mode === 'multi') {
                 // Multiplayer aiming
                 const isLocalKicker = state.multiKickerRole === state.playerRole;
@@ -1418,11 +1422,12 @@ function updateGameplay() {
                 }
             }
             break;
+        }
 
-        case 'runup':
+        case 'runup': {
             // Kicker runs toward the ball (converging on center X and ball Y)
             if (state.kickerY > KICKER_BALL_Y) {
-                state.kickerY -= KICKER_WALK_SPEED * 2;  // faster run-up
+                state.kickerY -= KICKER_WALK_SPEED;  // slower run-up
             }
             // Move X toward center (ball position)
             const targetX = CANVAS_WIDTH / 2;
@@ -1439,8 +1444,9 @@ function updateGameplay() {
                 state.stateTimer = 0;
             }
             break;
+        }
 
-        case 'charging':
+        case 'charging': {
             if (state.mode === 'multi') {
                 // Multiplayer charging — only kicker charges
                 const isLocalKicker = state.multiKickerRole === state.playerRole;
@@ -1482,8 +1488,9 @@ function updateGameplay() {
                 }
             }
             break;
+        }
 
-        case 'flight':
+        case 'flight': {
             // Animate ball toward target (same for both modes)
             const dx = state.ballTargetX - state.ballX;
             const dy = state.ballTargetY - state.ballY;
@@ -1538,8 +1545,9 @@ function updateGameplay() {
                 }
             }
             break;
+        }
 
-        case 'outcome':
+        case 'outcome': {
             if (state.stateTimer > 90) {
                 if (state.mode === 'multi') {
                     // Check if match is over
@@ -1562,6 +1570,7 @@ function updateGameplay() {
                 }
             }
             break;
+        }
 
         case 'waiting':
             // Multiplayer only — waiting for next round_start from server
@@ -1651,7 +1660,7 @@ function handleMultiplayerMessage(message) {
             state.waitingForOpponent = true;
             break;
 
-        case 'round_result':
+        case 'round_result': {
             state.lastRoundResult = message;
             state.waitingForOpponent = false;
             state.waitingForResult = false;
@@ -1668,6 +1677,7 @@ function handleMultiplayerMessage(message) {
             state.kickState = 'flight';
             state.stateTimer = 0;
             break;
+        }
 
         case 'match_over':
             state.matchOverData = message;
@@ -1827,7 +1837,7 @@ function renderLobby() {
     ctx.fillText('● ' + connStatus.toUpperCase(), CANVAS_WIDTH / 2, 110);
 
     switch (state.lobbyState) {
-        case 'menu':
+        case 'menu': {
             const options = ['CREATE ROOM', 'JOIN ROOM'];
             const sel = state.lobbySelection || 0;
             for (let i = 0; i < options.length; i++) {
@@ -1846,6 +1856,7 @@ function renderLobby() {
                 ctx.fillText(options[i], CANVAS_WIDTH / 2, y + 8);
             }
             break;
+        }
 
         case 'creating':
             ctx.fillStyle = '#FFF';
@@ -1853,7 +1864,7 @@ function renderLobby() {
             ctx.fillText('Creating room...', CANVAS_WIDTH / 2, 280);
             break;
 
-        case 'waiting':
+        case 'waiting': {
             ctx.fillStyle = '#FFF';
             ctx.font = '22px monospace';
             ctx.fillText('Room Code:', CANVAS_WIDTH / 2, 240);
@@ -1871,6 +1882,7 @@ function renderLobby() {
                 ctx.fillText('Waiting for opponent to join...', CANVAS_WIDTH / 2, 430);
             }
             break;
+        }
 
         case 'joining_input':
             ctx.fillStyle = '#FFF';
