@@ -14,6 +14,10 @@ const POWER_MAX = 100;
 const POWER_CHARGE_SPEED = 1.8;
 const BALL_FLIGHT_SPEED = 8;
 const KICK_ROUNDS = 5;
+const PENALTY_SPOT_Y = 399;     // Where the ball sits (matches pitch drawing)
+const KICKER_START_Y = 550;     // Kicker run-up starting position
+const KICKER_BALL_Y = PENALTY_SPOT_Y + 18;  // Kicker stands just behind ball
+const KICKER_WALK_SPEED = 2.5;  // Pixels per frame during run-up
 
 // Dive positions: { label, x, y } relative to goal
 const DIVE_POSITIONS = {
@@ -75,7 +79,7 @@ function initGameState() {
         aimY: 0,        // -1 to 1 (down to up)
         power: 0,
         ballX: CANVAS_WIDTH / 2,
-        ballY: 480,
+        ballY: PENALTY_SPOT_Y,
         ballTargetX: 0,
         ballTargetY: 0,
         ballVisible: true,
@@ -97,6 +101,8 @@ function initGameState() {
         // Pause menu
         paused: false,
         pauseSelection: 0,  // 0 = resume, 1 = restart, 2 = main menu
+        // Kicker position (for run-up animation)
+        kickerY: KICKER_START_Y,
     };
 }
 
@@ -106,7 +112,7 @@ function resetKickState() {
     state.aimY = 0;
     state.power = 0;
     state.ballX = CANVAS_WIDTH / 2;
-    state.ballY = 480;
+    state.ballY = PENALTY_SPOT_Y;
     state.ballTargetX = 0;
     state.ballTargetY = 0;
     state.ballVisible = true;
@@ -120,6 +126,7 @@ function resetKickState() {
     state.keeperY = GOAL_Y + GOAL_HEIGHT - 30;
     state.keeperDiving = false;
     state.keeperDiveTarget = null;
+    state.kickerY = KICKER_START_Y;
 }
 
 // --- INPUT HANDLER ---
@@ -442,7 +449,7 @@ function renderGameplay() {
     // Draw kicker
     const kickerTeam = state.playerIsKicker ? state.playerTeam : state.aiTeam;
     const kickerPose = (state.kickState === 'flight' || state.kickState === 'outcome') ? 'kick' : 'stand';
-    drawPlayer(CANVAS_WIDTH / 2, 500, kickerTeam, kickerPose);
+    drawPlayer(CANVAS_WIDTH / 2, state.kickerY, kickerTeam, kickerPose);
 
     // Draw ball AFTER kicker if in flight (so ball is visible flying toward goal)
     if (state.ballVisible && ballInFlight) {
@@ -1228,7 +1235,12 @@ function updateGameplay() {
 
     switch (state.kickState) {
         case 'ready':
-            if (state.stateTimer > 90) {  // ~1.5 seconds at 60fps
+            // Kicker walks up to the ball
+            if (state.kickerY > KICKER_BALL_Y) {
+                state.kickerY -= KICKER_WALK_SPEED;
+            }
+            if (state.stateTimer > 90 && state.kickerY <= KICKER_BALL_Y) {
+                state.kickerY = KICKER_BALL_Y;
                 state.kickState = 'aiming';
                 state.stateTimer = 0;
             }
