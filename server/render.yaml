@@ -1,0 +1,14 @@
+# Render Blueprint — WC26 Penalty Shooter Multiplayer Server
+# See: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: wc26-penalty-shooter-server
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 10000
+    plan: free

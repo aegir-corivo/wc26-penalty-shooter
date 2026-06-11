@@ -13,6 +13,7 @@ const AudioEngine = (() => {
     let isInitialized = false;
     let musicVolume = 0.35;
     let sfxVolume = 0.5;
+    let muted = false;
 
     // Note frequencies (octave 3-5)
     const NOTES = {
@@ -509,12 +510,27 @@ const AudioEngine = (() => {
 
     function setMusicVolume(v) {
         musicVolume = Math.max(0, Math.min(1, v));
-        if (musicGain) musicGain.gain.setValueAtTime(musicVolume, audioCtx.currentTime);
+        if (musicGain && !muted) musicGain.gain.setValueAtTime(musicVolume, audioCtx.currentTime);
     }
 
     function setSfxVolume(v) {
         sfxVolume = Math.max(0, Math.min(1, v));
-        if (sfxGain) sfxGain.gain.setValueAtTime(sfxVolume, audioCtx.currentTime);
+        if (sfxGain && !muted) sfxGain.gain.setValueAtTime(sfxVolume, audioCtx.currentTime);
+    }
+
+    function toggleMute() {
+        ensureContext();
+        muted = !muted;
+        if (muted) {
+            masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
+        } else {
+            masterGain.gain.setValueAtTime(0.8, audioCtx.currentTime);
+        }
+        return muted;
+    }
+
+    function isMuted() {
+        return muted;
     }
 
     return {
@@ -524,5 +540,7 @@ const AudioEngine = (() => {
         playSfx,
         setMusicVolume,
         setSfxVolume,
+        toggleMute,
+        isMuted,
     };
 })();

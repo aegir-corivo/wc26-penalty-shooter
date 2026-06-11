@@ -1,43 +1,112 @@
 # WC26 Penalty Shooter ⚽
 
-A FIFA 94-style penalty shootout browser game. Built with vanilla HTML5 Canvas and JavaScript — no dependencies, no build step.
+A FIFA 94-style penalty shootout game with single-player (vs AI) and online multiplayer (1v1) modes.
 
 ## How to Play
 
+### Single Player
 1. Open `index.html` in your browser
-2. Press any key to start
-3. Select your team using arrow keys, press Enter to confirm
-4. Take turns as the penalty taker and goalkeeper
+2. Press any key on the title screen
+3. Select "Single Player" mode
+4. Choose your team with arrow keys, press ENTER
+5. Alternate between kicking and saving!
 
-## Controls
+### Multiplayer (1v1 Online)
+1. Open `index.html` in your browser (both players)
+2. Select "Multiplayer" mode
+3. One player creates a room and shares the 5-letter code
+4. The other player joins using the code
+5. Both select teams, then the match begins!
 
-### As Penalty Taker
-- **Arrow Keys** — Aim direction (crosshair moves on goal)
-- **Space (hold)** — Charge power (higher power = less accuracy)
-- **Space (release)** — Shoot!
+### Controls
 
-### As Goalkeeper
-- **Q** — Dive top-left
-- **A** — Dive bottom-left
-- **W** — Stay center
-- **E** — Dive top-right
-- **D** — Dive bottom-right
-- **Space** — Confirm dive position
+**As Kicker:**
+- Arrow keys — aim direction
+- Hold SPACE — charge power (higher = faster but less accurate)
+- Release SPACE — shoot
 
-### Menu
-- **Arrow Keys** — Navigate
-- **Enter** — Confirm selection
+**As Goalkeeper:**
+- Q — dive top-left
+- A — dive bottom-left
+- W — dive center
+- E — dive top-right
+- D — dive bottom-right
+- SPACE — confirm dive
 
-## Rules
+---
 
-- Standard 5 kicks per side
-- You alternate between kicker and goalkeeper each kick
-- If tied after 5 rounds, sudden death begins
-- Higher shot power = faster ball but more random spread
+## Running Locally
+
+### Frontend Only (Single Player)
+Just open `index.html` in any modern browser. No build tools needed.
+
+### With Multiplayer Server
+
+1. **Install server dependencies:**
+   ```bash
+   cd server
+   npm install
+   ```
+
+2. **Start the server:**
+   ```bash
+   npm start
+   ```
+   Server runs on `http://localhost:3000` by default.
+
+3. **Open the game:**
+   Open `index.html` in your browser. The game connects to `ws://localhost:3000` by default.
+
+4. **Configure server URL (optional):**
+   To point at a different server, set `window.MULTIPLAYER_SERVER_URL` before the game loads:
+   ```html
+   <script>window.MULTIPLAYER_SERVER_URL = 'wss://your-server.onrender.com';</script>
+   ```
+
+---
+
+## Deployment
+
+### Frontend → Vercel
+```bash
+# From project root
+npx vercel
+```
+Serves `index.html`, `game.js`, and `multiplayer.js` as static files.
+
+### Backend → Render
+1. Push code to GitHub
+2. Create a new **Web Service** on [Render](https://render.com)
+3. Point to the `server/` directory
+4. Build command: `npm install`
+5. Start command: `npm start`
+6. Render assigns a public URL (e.g., `wss://wc26-penalty-shooter-server.onrender.com`)
+
+**Important:** Update `WS_SERVER_URL` in `game.js` (or set `window.MULTIPLAYER_SERVER_URL` in your HTML) to point to your Render server URL before deploying the frontend.
+
+---
+
+## Project Structure
+
+```
+wc26-penalty-shooter/
+├── index.html          — Game HTML page (canvas + scripts)
+├── game.js             — Game logic, renderer, scenes, game loop
+├── multiplayer.js      — WebSocket client module
+├── vercel.json         — Vercel deployment config
+├── README.md           — This file
+└── server/
+    ├── package.json    — Server dependencies
+    ├── server.js       — HTTP + WebSocket entry point
+    ├── room-manager.js — Room creation, joining, cleanup
+    ├── game-logic.js   — Server-side match state + outcome resolution
+    ├── render.yaml     — Render deployment blueprint
+    └── .gitignore      — Ignores node_modules
+```
+
+---
 
 ## Tech Stack
-
-- Vanilla HTML5 Canvas (800×600)
-- Single `game.js` file (~600 lines)
-- No frameworks, no build tools, no dependencies
-- Just open the HTML file and play
+- **Frontend**: Vanilla HTML5 Canvas + JavaScript (no dependencies)
+- **Backend**: Node.js + [ws](https://github.com/websockets/ws) library
+- **Hosting**: Vercel (frontend) + Render (backend)

@@ -18,11 +18,45 @@
             border: 2px solid #333;
             image-rendering: pixelated;
         }
+        #mute-btn {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            width: 40px;
+            height: 40px;
+            border: 2px solid #555;
+            border-radius: 6px;
+            background: #222;
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s, border-color 0.15s;
+            z-index: 10;
+        }
+        #mute-btn:hover {
+            background: #333;
+            border-color: #FFD700;
+        }
+        #mute-btn:focus-visible {
+            outline: 2px solid #FFD700;
+            outline-offset: 2px;
+        }
+        .game-wrapper {
+            position: relative;
+            display: inline-block;
+        }
     </style>
 </head>
 <body>
-    <canvas id="game" width="800" height="600"></canvas>
+    <div class="game-wrapper">
+        <canvas id="game" width="800" height="600"></canvas>
+        <button id="mute-btn" aria-label="Toggle audio mute" title="Toggle Mute (M)">🔊</button>
+    </div>
     <script src="audio.js"></script>
+    <script src="multiplayer.js"></script>
     <script src="game.js"></script>
 </body>
 </html>
