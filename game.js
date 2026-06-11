@@ -53,7 +53,7 @@ const TEAMS = [
 ];
 
 // --- MULTIPLAYER CONFIG ---
-const WS_SERVER_URL = window.MULTIPLAYER_SERVER_URL || 'ws://localhost:3000';
+const WS_SERVER_URL = window.MULTIPLAYER_SERVER_URL || 'wss://wc26-penalty-shooter.onrender.com';
 
 // --- GAME STATE ---
 let state = {};
