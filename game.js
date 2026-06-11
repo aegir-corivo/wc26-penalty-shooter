@@ -174,10 +174,10 @@ function aiChooseDive() {
 
 // --- GAME LOGIC ---
 function applyAccuracyPenalty(aimX, aimY, power) {
-    // Higher power = more random spread (can go outside goal frame)
-    // At max power, spread can push aim well beyond ±1 bounds
+    // Higher power = more random spread
+    // At full power, spread is enough to miss the goal from a corner aim
     const spreadFactor = (power / POWER_MAX);
-    const spread = spreadFactor * spreadFactor * 0.8;  // quadratic — ramps up fast at high power
+    const spread = spreadFactor * spreadFactor * 0.5;  // quadratic, max ±0.5 at full power
     const noiseX = (Math.random() * 2 - 1) * spread;
     const noiseY = (Math.random() * 2 - 1) * spread * 0.6;
     return {
@@ -187,15 +187,18 @@ function applyAccuracyPenalty(aimX, aimY, power) {
 }
 
 function calculateBallTarget(direction) {
-    // Map normalized direction to target area — WIDER than goal to allow misses
-    // The target area extends beyond the goal frame on all sides
-    const extraWidth = 60;  // pixels beyond each post where ball can go
-    const extraHeight = 40; // pixels above crossbar where ball can go
-    const totalWidth = GOAL_WIDTH + extraWidth * 2;
-    const totalHeight = GOAL_HEIGHT + extraHeight;
+    // Map normalized direction (-1 to 1) to the goal area
+    // Small padding so corner aims land just inside the posts
+    // Accuracy penalty can push beyond ±1 which goes outside the frame
+    const padX = 15;  // small inset from posts
+    const padY = 10;  // small inset from crossbar/ground
+    const usableWidth = GOAL_WIDTH - padX * 2;
+    const usableHeight = GOAL_HEIGHT - padY * 2;
 
-    const targetX = GOAL_X - extraWidth + (totalWidth / 2) + direction.x * (totalWidth / 2);
-    const targetY = (GOAL_Y - extraHeight) + totalHeight - ((direction.y + 1) / 2) * totalHeight;
+    const targetX = GOAL_X + padX + (usableWidth / 2) + direction.x * (usableWidth / 2);
+    // For Y: -1 = bottom of goal, +1 = top (crossbar)
+    const targetY = GOAL_Y + padY + usableHeight - ((direction.y + 1) / 2) * usableHeight;
+
     return { x: targetX, y: targetY };
 }
 
