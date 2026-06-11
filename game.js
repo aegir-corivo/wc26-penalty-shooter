@@ -14,6 +14,10 @@ const POWER_MAX = 100;
 const POWER_CHARGE_SPEED = 1.8;
 const BALL_FLIGHT_SPEED = 8;
 const KICK_ROUNDS = 5;
+const PENALTY_SPOT_Y = 379;     // Where the ball sits (matches pitch drawing)
+const KICKER_START_Y = 550;     // Kicker run-up starting position
+const KICKER_BALL_Y = PENALTY_SPOT_Y + 18;  // Kicker stands just behind ball
+const KICKER_WALK_SPEED = 2.5;  // Pixels per frame during run-up
 
 // Dive positions: { label, x, y } relative to goal
 const DIVE_POSITIONS = {
@@ -97,7 +101,7 @@ function initGameState() {
         aimY: 0,        // -1 to 1 (down to up)
         power: 0,
         ballX: CANVAS_WIDTH / 2,
-        ballY: 480,
+        ballY: PENALTY_SPOT_Y,
         ballTargetX: 0,
         ballTargetY: 0,
         ballVisible: true,
@@ -119,6 +123,10 @@ function initGameState() {
         // Pause menu
         paused: false,
         pauseSelection: 0,  // 0 = resume, 1 = restart, 2 = main menu
+        // Kicker position (for run-up animation)
+        kickerY: KICKER_START_Y,
+        kickerX: CANVAS_WIDTH / 2,
+        kickerLeftFooted: Math.random() < 0.20,  // ~20% chance left-footed
     };
 }
 
@@ -128,7 +136,7 @@ function resetKickState() {
     state.aimY = 0;
     state.power = 0;
     state.ballX = CANVAS_WIDTH / 2;
-    state.ballY = 480;
+    state.ballY = PENALTY_SPOT_Y;
     state.ballTargetX = 0;
     state.ballTargetY = 0;
     state.ballVisible = true;
@@ -142,6 +150,15 @@ function resetKickState() {
     state.keeperY = GOAL_Y + GOAL_HEIGHT - 30;
     state.keeperDiving = false;
     state.keeperDiveTarget = null;
+    // Randomize kicker starting distance (how far back they stand)
+    // Some players take a long run-up, others just a step or two
+    const distanceVariation = Math.random() * 180;  // 0-180px extra distance
+    state.kickerY = KICKER_BALL_Y + 30 + distanceVariation;  // minimum 30px back, max ~210px back
+    // Randomize footedness: ~20% left-footed
+    state.kickerLeftFooted = Math.random() < 0.20;
+    // Left-footed starts to the right of ball, right-footed starts to the left
+    const sideOffset = 75 + Math.random() * 45;  // 75-120px offset (3x wider)
+    state.kickerX = CANVAS_WIDTH / 2 + (state.kickerLeftFooted ? sideOffset : -sideOffset);
 }
 
 // --- INPUT HANDLER ---
@@ -462,8 +479,11 @@ function renderGameplay() {
 
     // Draw kicker
     const kickerTeam = state.playerIsKicker ? state.playerTeam : state.aiTeam;
-    const kickerPose = (state.kickState === 'flight' || state.kickState === 'outcome') ? 'kick' : 'stand';
-    drawPlayer(CANVAS_WIDTH / 2, 500, kickerTeam, kickerPose);
+    let kickerPose = 'stand';
+    if (state.kickState === 'flight' || state.kickState === 'outcome') {
+        kickerPose = state.kickerLeftFooted ? 'kickLeft' : 'kick';
+    }
+    drawPlayer(state.kickerX, state.kickerY, kickerTeam, kickerPose);
 
     // Draw ball AFTER kicker if in flight (so ball is visible flying toward goal)
     if (state.ballVisible && ballInFlight) {
@@ -1004,17 +1024,19 @@ function drawPlayer(x, y, team, pose) {
         ctx.fillRect(x - 22 + diveDir * 32, y - 12, 9, 9);
         ctx.fillStyle = '#222';
         ctx.fillRect(x - 22 + diveDir * 32, y - 14, 9, 3);
-    } else if (pose === 'kick') {
+    } else if (pose === 'kick' || pose === 'kickLeft') {
+        const leftFoot = (pose === 'kickLeft');
+        const s = leftFoot ? -1 : 1;  // mirror factor
         // Supporting leg + boot
         ctx.fillStyle = team.shirtColor;
-        ctx.fillRect(x - 5, y + 6, 6, 14);
+        ctx.fillRect(x - 5 * s - (leftFoot ? 1 : 0), y + 6, 6, 14);
         ctx.fillStyle = '#111';
-        ctx.fillRect(x - 6, y + 18, 8, 5);
+        ctx.fillRect(x - 6 * s - (leftFoot ? -1 : 0), y + 18, 8, 5);
         // Kicking leg (extended)
         ctx.fillStyle = team.shirtColor;
-        ctx.fillRect(x + 4, y - 2, 6, 14);
+        ctx.fillRect(x + 4 * s - (leftFoot ? 6 : 0), y - 2, 6, 14);
         ctx.fillStyle = '#111';
-        ctx.fillRect(x + 4, y + 10, 8, 5);
+        ctx.fillRect(x + 4 * s - (leftFoot ? 6 : 0), y + 10, 8, 5);
         // Shorts
         ctx.fillStyle = team.shortsColor;
         ctx.fillRect(x - 8, y - 6, 16, 11);
@@ -1350,13 +1372,14 @@ function updateGameplay() {
 
     switch (state.kickState) {
         case 'ready':
-            if (state.stateTimer > 90) {  // ~1.5 seconds at 60fps
+            // Kicker stands at starting position, show round info
+            if (state.stateTimer > 90) {
                 state.kickState = 'aiming';
                 state.stateTimer = 0;
             }
             break;
 
-        case 'aiming':
+        case 'aiming': {
             if (state.mode === 'multi') {
                 // Multiplayer aiming
                 const isLocalKicker = state.multiKickerRole === state.playerRole;
@@ -1368,7 +1391,7 @@ function updateGameplay() {
                     if (isKeyDown('arrowdown'))  state.aimY = Math.max(-1, state.aimY - 0.025);
 
                     if (wasKeyPressed(' ')) {
-                        state.kickState = 'charging';
+                        state.kickState = 'runup';
                         state.stateTimer = 0;
                     }
                 } else {
@@ -1386,7 +1409,7 @@ function updateGameplay() {
                     }
                 }
             } else {
-                // Single player aiming (unchanged)
+                // Single player aiming
                 if (state.playerIsKicker) {
                     if (isKeyDown('arrowleft'))  state.aimX = Math.max(-1, state.aimX - 0.025);
                     if (isKeyDown('arrowright')) state.aimX = Math.min(1, state.aimX + 0.025);
@@ -1394,7 +1417,7 @@ function updateGameplay() {
                     if (isKeyDown('arrowdown'))  state.aimY = Math.max(-1, state.aimY - 0.025);
 
                     if (wasKeyPressed(' ')) {
-                        state.kickState = 'charging';
+                        state.kickState = 'runup';
                         state.stateTimer = 0;
                     }
                 } else {
@@ -1409,14 +1432,37 @@ function updateGameplay() {
                         const aiShot = aiChooseShot();
                         state.aiShotDirection = applyAccuracyPenalty(aiShot.x, aiShot.y, aiShot.power);
                         state.aiShotPower = aiShot.power;
-                        state.kickState = 'charging';
+                        state.kickState = 'runup';
                         state.stateTimer = 0;
                     }
                 }
             }
             break;
+        }
 
-        case 'charging':
+        case 'runup': {
+            // Kicker runs toward the ball (converging on center X and ball Y)
+            if (state.kickerY > KICKER_BALL_Y) {
+                state.kickerY -= KICKER_WALK_SPEED;  // slower run-up
+            }
+            // Move X toward center (ball position)
+            const targetX = CANVAS_WIDTH / 2;
+            const dxToCenter = targetX - state.kickerX;
+            if (Math.abs(dxToCenter) > 2) {
+                state.kickerX += dxToCenter * 0.08;  // ease toward center
+            } else {
+                state.kickerX = targetX;
+            }
+            if (state.kickerY <= KICKER_BALL_Y) {
+                state.kickerY = KICKER_BALL_Y;
+                state.kickerX = targetX;
+                state.kickState = 'charging';
+                state.stateTimer = 0;
+            }
+            break;
+        }
+
+        case 'charging': {
             if (state.mode === 'multi') {
                 // Multiplayer charging — only kicker charges
                 const isLocalKicker = state.multiKickerRole === state.playerRole;
@@ -1461,8 +1507,9 @@ function updateGameplay() {
                 }
             }
             break;
+        }
 
-        case 'flight':
+        case 'flight': {
             // Animate ball toward target (same for both modes)
             const dx = state.ballTargetX - state.ballX;
             const dy = state.ballTargetY - state.ballY;
@@ -1539,8 +1586,9 @@ function updateGameplay() {
                 }
             }
             break;
+        }
 
-        case 'outcome':
+        case 'outcome': {
             if (state.stateTimer > 90) {
                 if (state.mode === 'multi') {
                     // Check if match is over
@@ -1569,6 +1617,7 @@ function updateGameplay() {
                 }
             }
             break;
+        }
 
         case 'waiting':
             // Multiplayer only — waiting for next round_start from server
@@ -1676,7 +1725,7 @@ function handleMultiplayerMessage(message) {
             state.waitingForOpponent = true;
             break;
 
-        case 'round_result':
+        case 'round_result': {
             state.lastRoundResult = message;
             state.waitingForOpponent = false;
             state.waitingForResult = false;
@@ -1700,6 +1749,7 @@ function handleMultiplayerMessage(message) {
             state.kickState = 'flight';
             state.stateTimer = 0;
             break;
+        }
 
         case 'match_over':
             state.matchOverData = message;
@@ -1859,7 +1909,7 @@ function renderLobby() {
     ctx.fillText('● ' + connStatus.toUpperCase(), CANVAS_WIDTH / 2, 110);
 
     switch (state.lobbyState) {
-        case 'menu':
+        case 'menu': {
             const options = ['CREATE ROOM', 'JOIN ROOM'];
             const sel = state.lobbySelection || 0;
             for (let i = 0; i < options.length; i++) {
@@ -1878,6 +1928,7 @@ function renderLobby() {
                 ctx.fillText(options[i], CANVAS_WIDTH / 2, y + 8);
             }
             break;
+        }
 
         case 'creating':
             ctx.fillStyle = '#FFF';
@@ -1885,7 +1936,7 @@ function renderLobby() {
             ctx.fillText('Creating room...', CANVAS_WIDTH / 2, 280);
             break;
 
-        case 'waiting':
+        case 'waiting': {
             ctx.fillStyle = '#FFF';
             ctx.font = '22px monospace';
             ctx.fillText('Room Code:', CANVAS_WIDTH / 2, 240);
@@ -1903,6 +1954,7 @@ function renderLobby() {
                 ctx.fillText('Waiting for opponent to join...', CANVAS_WIDTH / 2, 430);
             }
             break;
+        }
 
         case 'joining_input':
             ctx.fillStyle = '#FFF';
