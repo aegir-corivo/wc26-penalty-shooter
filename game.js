@@ -1131,9 +1131,14 @@ function drawScoreboard() {
 
 // --- SCENE CONTROLLERS ---
 function updateTitle() {
+    // Start title music on first frame
+    AudioEngine.playTrack('title');
+
     // Wait for any key
     for (const key in keysPressed) {
         if (keysPressed[key]) {
+            AudioEngine.init(); // Ensure audio context is started on user gesture
+            AudioEngine.playSfx('confirm');
             state.scene = 'team-select';
             return;
         }
@@ -1141,19 +1146,24 @@ function updateTitle() {
 }
 
 function updateTeamSelect() {
+    AudioEngine.playTrack('team-select');
     const cols = 4;
 
     if (wasKeyPressed('arrowright')) {
         state.selectedTeamIndex = (state.selectedTeamIndex + 1) % TEAMS.length;
+        AudioEngine.playSfx('select');
     }
     if (wasKeyPressed('arrowleft')) {
         state.selectedTeamIndex = (state.selectedTeamIndex - 1 + TEAMS.length) % TEAMS.length;
+        AudioEngine.playSfx('select');
     }
     if (wasKeyPressed('arrowdown')) {
         state.selectedTeamIndex = (state.selectedTeamIndex + cols) % TEAMS.length;
+        AudioEngine.playSfx('select');
     }
     if (wasKeyPressed('arrowup')) {
         state.selectedTeamIndex = (state.selectedTeamIndex - cols + TEAMS.length) % TEAMS.length;
+        AudioEngine.playSfx('select');
     }
 
     if (wasKeyPressed('enter')) {
@@ -1176,10 +1186,13 @@ function updateTeamSelect() {
         state.suddenDeathRound = 0;
         resetKickState();
         state.scene = 'gameplay';
+        AudioEngine.playSfx('confirm');
+        AudioEngine.playSfx('whistle');
     }
 }
 
 function updateGameplay() {
+    AudioEngine.playTrack('gameplay');
     // Pause menu toggle
     if (wasKeyPressed('escape')) {
         state.paused = !state.paused;
@@ -1191,9 +1204,11 @@ function updateGameplay() {
     if (state.paused) {
         if (wasKeyPressed('arrowup')) {
             state.pauseSelection = (state.pauseSelection - 1 + 3) % 3;
+            AudioEngine.playSfx('select');
         }
         if (wasKeyPressed('arrowdown')) {
             state.pauseSelection = (state.pauseSelection + 1) % 3;
+            AudioEngine.playSfx('select');
         }
         if (wasKeyPressed('enter')) {
             switch (state.pauseSelection) {
@@ -1215,6 +1230,7 @@ function updateGameplay() {
                 case 2: // Main menu
                     state.paused = false;
                     state.scene = 'title';
+                    AudioEngine.playSfx('confirm');
                     break;
             }
         }
@@ -1259,6 +1275,7 @@ function updateGameplay() {
                     state.aiShotPower = aiShot.power;
                     state.kickState = 'charging';
                     state.stateTimer = 0;
+                    AudioEngine.playSfx('kick');
                 }
             }
             break;
@@ -1270,6 +1287,7 @@ function updateGameplay() {
                     state.power = Math.min(POWER_MAX, state.power + POWER_CHARGE_SPEED);
                 } else {
                     // Released — kick!
+                    AudioEngine.playSfx('kick');
                     const direction = applyAccuracyPenalty(state.aimX, state.aimY, state.power);
                     const target = calculateBallTarget(direction);
                     state.ballTargetX = target.x;
@@ -1328,6 +1346,12 @@ function updateGameplay() {
                 // Determine result
                 state.kickResult = processKick(state.ballTargetX, state.ballTargetY, state.divePosition);
 
+                // Play outcome SFX
+                if (state.kickResult === 'goal') AudioEngine.playSfx('goal');
+                else if (state.kickResult === 'save') AudioEngine.playSfx('save');
+                else if (state.kickResult === 'post') AudioEngine.playSfx('post');
+                else AudioEngine.playSfx('miss');
+
                 // Record result
                 if (state.playerIsKicker) {
                     const scored = state.kickResult === 'goal';
@@ -1349,6 +1373,7 @@ function updateGameplay() {
                 // Check if shootout is over
                 const winner = checkWinner();
                 if (winner) {
+                    AudioEngine.playSfx('whistle');
                     state.scene = 'result';
                 } else {
                     state.kickState = 'next';
@@ -1365,7 +1390,9 @@ function updateGameplay() {
 }
 
 function updateResult() {
+    AudioEngine.playTrack('result');
     if (wasKeyPressed('enter')) {
+        AudioEngine.playSfx('confirm');
         state.scene = 'team-select';
         state.selectedTeamIndex = 0;
     }
@@ -1395,6 +1422,14 @@ function gameLoop() {
 function startGame() {
     initGameState();
     initInput();
+    // Initialize audio on first user interaction (browsers require gesture)
+    const initAudioOnce = () => {
+        AudioEngine.init();
+        document.removeEventListener('keydown', initAudioOnce);
+        document.removeEventListener('click', initAudioOnce);
+    };
+    document.addEventListener('keydown', initAudioOnce);
+    document.addEventListener('click', initAudioOnce);
     requestAnimationFrame(gameLoop);
 }
 
