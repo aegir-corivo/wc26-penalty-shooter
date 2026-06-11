@@ -26,7 +26,7 @@ function validateKickAction(direction, power) {
   if (!direction || typeof direction.x !== 'number' || typeof direction.y !== 'number') {
     return false;
   }
-  if (direction.x < -1 || direction.x > 1 || direction.y < 0 || direction.y > 1) {
+  if (direction.x < -1 || direction.x > 1 || direction.y < -1 || direction.y > 1) {
     return false;
   }
   if (typeof power !== 'number' || power < 0 || power > 1) {
@@ -59,7 +59,7 @@ function submitAction(gameState, clientId, action) {
       return { valid: false, error: 'Kicker must submit kick_action' };
     }
     if (!validateKickAction(action.direction, action.power)) {
-      return { valid: false, error: 'Invalid kick action: direction must be {x: -1..1, y: 0..1}, power must be 0..1' };
+      return { valid: false, error: 'Invalid kick action: direction must be {x: -1..1, y: -1..1}, power must be 0..1' };
     }
     if (gameState.actions.kicker !== null) {
       return { valid: false, error: 'Kick action already submitted' };
@@ -146,7 +146,7 @@ function applyAccuracyPenalty(direction, power) {
 
 function isMissed(direction) {
   // Ball goes off target if direction is too extreme
-  return Math.abs(direction.x) > 1.0 || direction.y > 1.0 || direction.y < 0;
+  return Math.abs(direction.x) > 1.0 || direction.y > 1.0 || direction.y < -1.0;
 }
 
 function getBallZone(direction) {
@@ -154,11 +154,11 @@ function getBallZone(direction) {
   const x = direction.x;
   const y = direction.y;
 
-  if (Math.abs(x) < 0.25 && y < 0.6) return 'center';
-  if (x < -0.25 && y >= 0.5) return 'top-left';
-  if (x < -0.25 && y < 0.5) return 'bottom-left';
-  if (x >= 0.25 && y >= 0.5) return 'top-right';
-  if (x >= 0.25 && y < 0.5) return 'bottom-right';
+  if (Math.abs(x) < 0.25 && Math.abs(y) < 0.4) return 'center';
+  if (x < -0.25 && y >= 0) return 'top-left';
+  if (x < -0.25 && y < 0) return 'bottom-left';
+  if (x >= 0.25 && y >= 0) return 'top-right';
+  if (x >= 0.25 && y < 0) return 'bottom-right';
   return 'center';
 }
 

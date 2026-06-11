@@ -57,7 +57,17 @@ const TEAMS = [
 ];
 
 // --- MULTIPLAYER CONFIG ---
-const WS_SERVER_URL = window.MULTIPLAYER_SERVER_URL || 'wss://wc26-penalty-shooter.onrender.com';
+function getDefaultMultiplayerServerUrl() {
+    const isLocalPage = window.location.protocol === 'file:' ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1';
+
+    return isLocalPage
+        ? 'ws://localhost:3000'
+        : 'wss://wc26-penalty-shooter.onrender.com';
+}
+
+const WS_SERVER_URL = window.MULTIPLAYER_SERVER_URL || getDefaultMultiplayerServerUrl();
 
 // --- GAME STATE ---
 let state = {};
@@ -84,6 +94,7 @@ function initGameState() {
         lastRoundResult: null,
         matchOverData: null,
         pendingRoundStart: null,
+        multiError: null,
         // Team selection
         selectedTeamIndex: 0,
         playerTeam: null,
@@ -580,6 +591,15 @@ function renderGameplay() {
         ctx.textAlign = 'center';
         const dots = '.'.repeat(Math.floor(Date.now() / 500) % 4);
         ctx.fillText('Waiting for opponent' + dots, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 5);
+    }
+
+    if (state.mode === 'multi' && state.multiError) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(CANVAS_WIDTH / 2 - 260, CANVAS_HEIGHT / 2 + 40, 520, 50);
+        ctx.fillStyle = '#FF6666';
+        ctx.font = '16px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(state.multiError, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 70);
     }
 
     // Pause menu overlay
@@ -1498,6 +1518,7 @@ function updateGameplay() {
 
                     if (wasKeyPressed(' ')) {
                         // Send dive action to server
+                        state.multiError = null;
                         Multiplayer.sendDiveAction(state.selectedDive);
                         state.waitingForOpponent = true;
                     }
@@ -1587,6 +1608,7 @@ function updateGameplay() {
                         // Released — send kick action to server
                         if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('kick');
                         const power = state.power / POWER_MAX; // normalize to 0-1
+                        state.multiError = null;
                         Multiplayer.sendKickAction({ x: state.aimX, y: state.aimY }, power);
                         state.waitingForOpponent = true;
                         state.waitingForResult = true;
@@ -1818,8 +1840,11 @@ function handleMultiplayerMessage(message) {
             state.multiScores = { player1: 0, player2: 0 };
             state.multiRound = 1;
             state.multiSuddenDeath = false;
+            state.round = 1;
+            state.suddenDeath = false;
             state.matchOverData = null;
             state.pendingRoundStart = null;
+            state.multiError = null;
             state.waitingForOpponent = false;
             state.waitingForResult = false;
             state.playerIsKicker = (message.kickerRole === state.playerRole);
@@ -1828,9 +1853,12 @@ function handleMultiplayerMessage(message) {
             break;
 
         case 'round_start':
+            state.multiError = null;
             state.multiKickerRole = message.kickerRole;
             state.multiRound = message.round;
             state.multiSuddenDeath = message.suddenDeath;
+            state.round = message.round;
+            state.suddenDeath = message.suddenDeath;
             state.multiScores = message.scores;
             state.playerIsKicker = (message.kickerRole === state.playerRole);
             state.waitingForOpponent = false;
@@ -1890,6 +1918,14 @@ function handleMultiplayerMessage(message) {
             break;
 
         case 'error':
+            if (state.scene === 'gameplay') {
+                state.multiError = message.message;
+                state.waitingForOpponent = false;
+                state.waitingForResult = false;
+                if (state.kickState === 'waiting') {
+                    state.kickState = 'aiming';
+                }
+            }
             state.lobbyError = message.message;
             break;
     }
