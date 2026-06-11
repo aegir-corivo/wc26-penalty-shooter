@@ -120,6 +120,9 @@ function initGameState() {
         // Sudden death
         suddenDeath: false,
         suddenDeathRound: 0,
+        // Left-footer guarantee
+        hadLeftFooter: false,
+        forcedLeftFootKick: Math.floor(Math.random() * 6),  // which kick (0-5) is forced left-footed
         // Pause menu
         paused: false,
         pauseSelection: 0,  // 0 = resume, 1 = restart, 2 = main menu
@@ -156,7 +159,15 @@ function resetKickState() {
     const distanceVariation = Math.random() * 180;  // 0-180px extra distance
     state.kickerY = KICKER_BALL_Y + 30 + distanceVariation;  // minimum 30px back, max ~210px back
     // Randomize footedness: ~20% left-footed
-    state.kickerLeftFooted = Math.random() < 0.20;
+    // Guarantee at least one left-footed kicker in the first 6 kicks (for variety)
+    const totalKicksTaken = state.playerKicks.length + state.aiKicks.length;
+    if (totalKicksTaken < 6 && !state.hadLeftFooter && totalKicksTaken === state.forcedLeftFootKick) {
+        state.kickerLeftFooted = true;
+        state.hadLeftFooter = true;
+    } else {
+        state.kickerLeftFooted = Math.random() < 0.20;
+        if (state.kickerLeftFooted) state.hadLeftFooter = true;
+    }
     // Left-footed starts to the right of ball, right-footed starts to the left
     const sideOffset = 75 + Math.random() * 45;  // 75-120px offset (3x wider)
     state.kickerX = CANVAS_WIDTH / 2 + (state.kickerLeftFooted ? sideOffset : -sideOffset);
