@@ -185,6 +185,30 @@ function resetKickState() {
     state.heelKick = false;
 }
 
+// Strike the ball using the power/aim already chosen during the 'charging' phase.
+// Called at the end of the run-up so the power decision happens before the run-up.
+function strikeKick() {
+    if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('kick');
+    if (state.mode === 'multi') {
+        // Multiplayer — send the chosen action to the server and wait for the result
+        const power = state.power / POWER_MAX; // normalize to 0-1
+        state.multiError = null;
+        Multiplayer.sendKickAction({ x: state.aimX, y: state.aimY }, power);
+        state.waitingForOpponent = true;
+        state.waitingForResult = true;
+    } else {
+        // Single player — resolve the shot locally
+        const direction = applyAccuracyPenalty(state.aimX, state.aimY, state.power);
+        const target = calculateBallTarget(direction);
+        state.ballTargetX = target.x;
+        state.ballTargetY = target.y;
+        state.divePosition = aiChooseDive();
+        state.keeperDiveTarget = DIVE_POSITIONS[state.divePosition];
+        state.kickState = 'flight';
+    }
+    state.stateTimer = 0;
+}
+
 // --- INPUT HANDLER ---
 const keys = {};
 const keysPressed = {};
@@ -1505,7 +1529,8 @@ function updateGameplay() {
                     if (isKeyDown('arrowdown'))  state.aimY = Math.max(-1, state.aimY - 0.025);
 
                     if (wasKeyPressed(' ')) {
-                        state.kickState = 'runup';
+                        // Decide power first, then run up to strike
+                        state.kickState = 'charging';
                         state.stateTimer = 0;
                     }
                 } else {
@@ -1537,7 +1562,8 @@ function updateGameplay() {
                             state.heelKick = true;
                             state.kickState = 'runup';
                         } else {
-                            state.kickState = 'runup';
+                            // Decide power first, then run up to strike
+                            state.kickState = 'charging';
                         }
                         state.stateTimer = 0;
                     }
@@ -1580,10 +1606,20 @@ function updateGameplay() {
                 if (state.heelKick) {
                     // Heel kick: pause to turn around before kicking
                     state.kickState = 'turning';
+                    state.stateTimer = 0;
                 } else {
-                    state.kickState = 'charging';
+                    const humanKicker = state.mode === 'multi'
+                        ? (state.multiKickerRole === state.playerRole)
+                        : state.playerIsKicker;
+                    if (humanKicker) {
+                        // Power was already chosen during 'charging' — strike now
+                        strikeKick();
+                    } else {
+                        // AI kicker: brief wind-up pause, then fire
+                        state.kickState = 'charging';
+                        state.stateTimer = 0;
+                    }
                 }
-                state.stateTimer = 0;
             }
             break;
         }
@@ -1599,19 +1635,15 @@ function updateGameplay() {
 
         case 'charging': {
             if (state.mode === 'multi') {
-                // Multiplayer charging — only kicker charges
+                // Multiplayer — kicker sets power, then runs up to strike
                 const isLocalKicker = state.multiKickerRole === state.playerRole;
                 if (isLocalKicker) {
                     if (isKeyDown(' ')) {
                         state.power = Math.min(POWER_MAX, state.power + POWER_CHARGE_SPEED);
                     } else {
-                        // Released — send kick action to server
-                        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('kick');
-                        const power = state.power / POWER_MAX; // normalize to 0-1
-                        state.multiError = null;
-                        Multiplayer.sendKickAction({ x: state.aimX, y: state.aimY }, power);
-                        state.waitingForOpponent = true;
-                        state.waitingForResult = true;
+                        // Power chosen — run up to the ball before striking
+                        state.kickState = 'runup';
+                        state.stateTimer = 0;
                     }
                 }
             } else {
@@ -1631,14 +1663,8 @@ function updateGameplay() {
                     } else if (isKeyDown(' ')) {
                         state.power = Math.min(POWER_MAX, state.power + POWER_CHARGE_SPEED);
                     } else {
-                        if (typeof AudioEngine !== 'undefined') AudioEngine.playSfx('kick');
-                        const direction = applyAccuracyPenalty(state.aimX, state.aimY, state.power);
-                        const target = calculateBallTarget(direction);
-                        state.ballTargetX = target.x;
-                        state.ballTargetY = target.y;
-                        state.divePosition = aiChooseDive();
-                        state.keeperDiveTarget = DIVE_POSITIONS[state.divePosition];
-                        state.kickState = 'flight';
+                        // Power chosen — run up to the ball before striking
+                        state.kickState = 'runup';
                         state.stateTimer = 0;
                     }
                 } else {
